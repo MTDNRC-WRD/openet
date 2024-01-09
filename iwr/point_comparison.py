@@ -12,7 +12,6 @@ from utils.agrimet import load_stations
 from reference_et.combination import pm_fao56, get_rn
 from reference_et.rad_utils import extraterrestrial_r, calc_rso
 from reference_et.modified_bcriddle import modified_blaney_criddle
-from utils.elevation import elevation_from_coordinate
 from utils.thredds import GridMet
 from utils.elevation import elevation_from_coordinate
 import warnings

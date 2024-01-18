@@ -29,6 +29,7 @@ from geopy.distance import geodesic
 from pandas import read_table, to_datetime, date_range, to_numeric, DataFrame
 
 STATION_INFO_URL = 'https://www.usbr.gov/pn/agrimet/agrimetmap/usbr_map.json'
+# AGRIMET_MET_REQ_SCRIPT_PN = 'https://www.usbr.gov/pn-bin/agrimet.pl' ## appears to be broken
 AGRIMET_MET_REQ_SCRIPT_PN = 'https://www.usbr.gov/pn-bin/agrimet.pl'
 AGRIMET_CROP_REQ_SCRIPT_PN = 'https://www.usbr.gov/pn/agrimet/chart/{}{}et.txt'
 AGRIMET_MET_REQ_SCRIPT_GP = 'https://www.usbr.gov/gp-bin/agrimet_archives.pl'
@@ -190,13 +191,28 @@ class Agrimet(object):
 
     def fetch_met_data(self, return_raw=False, out_csv_file=None, long_names=False):
 
+        # if self.region == 'pnro': ## not working anymore
+        #     url = '{}?{}'.format(AGRIMET_MET_REQ_SCRIPT_PN, self.params)
+        #     print(url)
+        #     r = requests.get(url)
+        #     txt = r.text.split('\n')
+        #     s_idx, e_idx = txt.index('BEGIN DATA\r'), txt.index('END DATA\r')
+
         if self.region == 'pnro':
-            url = '{}?{}'.format(AGRIMET_MET_REQ_SCRIPT_PN, self.params)
+            pairs = ','.join(['{} {}'.format(self.station.upper(), x.upper()) for x in STANDARD_PARAMS])
+            url = "https://www.usbr.gov/pn-bin/webarccsv.pl?parameter={0}&syer={1}&smnth={2}&sdy={3}&" \
+                  "eyer={4}&emnth={5}&edy={6}&format=2".format(pairs,
+                                                               self.start.year,
+                                                               self.start.month,
+                                                               self.start.day,
+                                                               self.end.year,
+                                                               self.end.month,
+                                                               self.end.day)
             r = requests.get(url)
             txt = r.text.split('\n')
-            s_idx, e_idx = txt.index('BEGIN DATA\r'), txt.index('END DATA\r')
+            s_idx, e_idx = txt.index('BEGIN DATA'), txt.index('END DATA')
 
-        if self.region == 'great_plains':
+        if self.region == 'great_plains' or self.region == 'gpro':
             pairs = ','.join(['{} {}'.format(self.station.upper(), x.upper()) for x in STANDARD_PARAMS])
             url = "https://www.usbr.gov/gp-bin/webarccsv.pl?parameter={0}&syer={1}&smnth={2}&sdy={3}&" \
                   "eyer={4}&emnth={5}&edy={6}&format=2".format(pairs,
@@ -206,7 +222,6 @@ class Agrimet(object):
                                                                self.end.year,
                                                                self.end.month,
                                                                self.end.day)
-
             r = requests.get(url)
             txt = r.text.split('\r\n')
             s_idx, e_idx = txt.index('BEGIN DATA'), txt.index('END DATA')
@@ -390,7 +405,36 @@ def load_stations():
     return stations
 
 
+def load_stations_1():
+    ## Uses JSON file dowloaded from BOR website,
+    stations = json.load(open('C:/Users/CND571/Downloads/AgriMet_station_list.json'))
+    stations = stations['features']
+    stations = {s['properties']['StationID']: s for s in stations}
+    return stations
+
+
 if __name__ == '__main__':
+    stations = load_stations()
+    sid = 'bfam'
+    print(stations[sid])
+    bfam = Agrimet(station=sid, region=stations[sid]['properties']['region'],
+                   start_date='2000-01-01', end_date='2023-12-31')
+    data = bfam.fetch_met_data()
+    # print(data)
+    data.columns = data.columns.droplevel([1,2])
+    print(data)
+
+    stations1 = load_stations_1()
+
+    sid = 'bfam'.upper()
+    print(stations1[sid])
+    bfam = Agrimet(station=sid, region=stations1[sid]['properties']['StationOffice'],
+                   start_date='2000-01-01', end_date='2023-12-31')
+    data = bfam.fetch_met_data()
+    # print(data)
+    data.columns = data.columns.droplevel([1, 2])
+    print(data)
+
     pass
 
 # ========================= EOF ====================================================================

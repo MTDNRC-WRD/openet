@@ -25,6 +25,9 @@ lat_to_sunshine = {50: [5.99, 6.32, 8.24, 9.24, 10.68, 10.92, 10.99, 9.99, 8.46,
 
 alfalfa_kc = [0.63, 0.73, 0.86, 0.99, 1.08, 1.13, 1.11, 1.06, 0.99, 0.91, 0.78, 0.64]
 
+alfalfa_kc_1 = [0.6, 0.63, 0.68, 0.73, 0.79, 0.86, 0.92, 0.98, 1.04, 1.08, 1.12, 1.13,
+                1.12, 1.11, 1.09, 1.06, 1.03, 0.99, 0.95, 0.91, 0.85, 0.78, 0.72, 0.64]
+
 def get_iwr_db_temp(station):
     """ Returns the monthly mean temperatures from the IWR database as a pandas series given the last 4 digits of an IWR weather station
     as a string """
@@ -505,7 +508,7 @@ def modified_blaney_criddle(df, lat_degrees=None, elev=None, season_start=None, 
     return df, season_start, season_end, kc
 
 
-def modified_blaney_criddle_1(clim_db_loc, station, lat_degrees=None, elev=None):
+def modified_blaney_criddle_1(clim_db_loc, station, lat_degrees=None, elev=None, fullmonth=False):
     """
     Custom implementation of the SCS Blaney Criddle method.
     Updated to not rely on information outside IWR climate db
@@ -524,21 +527,26 @@ def modified_blaney_criddle_1(clim_db_loc, station, lat_degrees=None, elev=None)
     while table[i]['Station No'][2:] != station:
         i += 1
     row = table[i]
-    # print(row)
+    print(row['Station Name'])
     ## loading monthly mean temps from IWR db
     t = pd.Series({1: row['T Jan'], 2: row['T Feb'], 3: row['T Mar'], 4: row['T Apr'], 5: row['T May'],
                        6: row['T Jun'], 7: row['T Jul'], 8: row['T Aug'], 9: row['T Sep'], 10: row['T Oct'],
                        11: row['T Nov'], 12: row['T Dec']})
     # print(t)
-    season_end = pd.to_datetime(row['Fall mo/dy 28'] + '/2000') ## average freeze date from database
+    season_end = pd.to_datetime(row['Fall mo/dy 28'] + '/2000')  ## average freeze date from database
 
     ## calculating season start
     month = t[t >= 50].index[0]  ## get month when temp gets above 50
-    month_len = monthrange(2000, month-1)[1]  ## get length of preceding month
-    season_start = datetime(year=2000, month=month-1, day=15)  ## get midpoint of preceding month
+    month_len = monthrange(2000, month - 1)[1]  ## get length of preceding month
+    season_start = datetime(year=2000, month=month - 1, day=15)  ## get midpoint of preceding month
     ## calculate number of days past midpoint of preceding month when we reach average temp of 50
     days = round(((50. - t[month - 1]) * month_len) / (t[month] - t[month - 1]))
     season_start = season_start + timedelta(days=days)  ## add days
+
+    if fullmonth:
+        ## something a little weird with start dates/first period... non-inclusive of last day of month?
+        season_start = pd.to_datetime('2000-05-01') ## ex: 4-30 vs 5-01 doesn't change result.
+        season_end = pd.to_datetime('2000-09-30')
 
     season_length = (season_end - season_start).days
 
@@ -551,18 +559,26 @@ def modified_blaney_criddle_1(clim_db_loc, station, lat_degrees=None, elev=None)
         first_period.append(d)
         d += timedelta(days=1)
 
-    midpoint = season_start + (d - season_start) / 2
-    if midpoint.hour != 0:
-        midpoint = midpoint - timedelta(hours=12) ## to avoid splitting a day in half
-    counter = (midpoint - season_start).days
-    t_prev, t_next = t.loc[midpoint.month], t.loc[midpoint.month + 1]
-    month_len = monthrange(2000, midpoint.month)[1]
-    remaining_days = month_len - season_start.day
-    month_fraction = remaining_days / month_len
-    temp = t_prev + (month_fraction * (t_next - t_prev))
+    if d != season_start:
+        midpoint = season_start + (d - season_start) / 2
+        if midpoint.hour != 0:
+            midpoint = midpoint - timedelta(hours=12) ## to avoid splitting a day in half
+        counter = (midpoint - season_start).days
+        t_prev, t_next = t.loc[midpoint.month], t.loc[midpoint.month + 1]
+        month_len = monthrange(2000, midpoint.month)[1]
+        interp_fraction = (midpoint.day - 15) / month_len
+        print('interp_fraction 1: ', interp_fraction)
+        remaining_days = month_len - season_start.day
+        month_fraction = remaining_days / month_len
+        temp = t_prev + (interp_fraction * (t_next - t_prev))
 
-    day_prev, day_next = sunshine[midpoint.month - 1], sunshine[midpoint.month]
-    daylight = (day_prev + (month_fraction * (day_next - day_prev))) * month_fraction
+        day_prev, day_next = sunshine[midpoint.month - 1], sunshine[midpoint.month]
+        daylight = (day_prev + (interp_fraction * (day_next - day_prev))) * month_fraction
+    else:
+        midpoint = season_start + timedelta(days=15)
+        counter = (midpoint - season_start).days
+        temp = t.loc[midpoint.month]
+        daylight = sunshine[midpoint.month - 1]
 
     dates, d_accum, pct_season = [midpoint], [counter], [counter / season_length]
     temps, pct_day_hrs = [temp], [daylight]
@@ -575,40 +591,47 @@ def modified_blaney_criddle_1(clim_db_loc, station, lat_degrees=None, elev=None)
             temps.append(t.loc[d.month])
             pct_day_hrs.append(sunshine[d.month - 1])
 
-    second_period = []
-    d = dates[-1]
-    while d != season_end:
-        second_period.append(d)
-        d += timedelta(days=1)
+    # second_period = []
+    # d = dates[-1]
+    # while d != season_end:
+    #     second_period.append(d)
+    #     d += timedelta(days=1)
 
-    if season_end.day > 15:  ## remove last entry above, make sure second period is correct.
+    if season_end.day > 15:  ## remove last entry
         dates = dates[:-1]
         d_accum = d_accum[:-1]
         pct_season = pct_season[:-1]
         pct_day_hrs = pct_day_hrs[:-1]
         temps = temps[:-1]
 
-        ## start of second period should be first of the month
-        second_period = []
-        d = dates[-1]
-        while d.day != 1:
-            d += timedelta(days=1)
-        while d != season_end:
-            second_period.append(d)
-            d += timedelta(days=1)
+    ## start of second period should always be first of the month
+    second_period = []
+    d = dates[-1]
+    while d.day != 1:
+        d += timedelta(days=1)
+    while d != season_end:
+        second_period.append(d)
+        d += timedelta(days=1)
 
-    midpoint = second_period[0] + (second_period[-1] - second_period[0]) / 2
-    if midpoint.hour != 0:
-        midpoint = midpoint - timedelta(hours=12)  ## to avoid splitting a day in half
+    if len(second_period) > 0:
+        midpoint = second_period[0] + (second_period[-1] - second_period[0]) / 2
+        if midpoint.hour != 0:
+            midpoint = midpoint - timedelta(hours=12)  ## to avoid splitting a day in half
+    else:
+        midpoint = season_end
+
     t_prev, t_next = t.loc[midpoint.month - 1], t.loc[midpoint.month]
     remaining_days = len(second_period) + 1
     month_len = monthrange(2000, midpoint.month)[1]
     month_fraction = remaining_days / month_len
-    temp = t_prev + (month_fraction * (t_next - t_prev))
+    # prev_month_len = monthrange(2000, midpoint.month - 1)[1] ## do we need this?
+    interp_fraction = (midpoint.day + 15) / month_len
+    print('interp_fraction 2: ', interp_fraction)
+    temp = t_prev + (interp_fraction * (t_next - t_prev))
     accum_days_last = (midpoint - season_start).days
 
     day_prev, day_next = sunshine[midpoint.month - 2], sunshine[midpoint.month - 1]
-    daylight = (day_prev + (month_fraction * (day_next - day_prev))) * month_fraction
+    daylight = (day_prev + (interp_fraction * (day_next - day_prev))) * month_fraction
 
     dates.append(midpoint)
     d_accum.append(accum_days_last)
@@ -629,8 +652,11 @@ def modified_blaney_criddle_1(clim_db_loc, station, lat_degrees=None, elev=None)
     df['kt'][df['t'] < 36.] = 0.3
 
     elevation_corr = 1 + (0.1 * np.floor(elev / 1000.))  ## from footnote 3 on IWR results page
+    # elevation_corr = 1 + (0.1 * round(elev / 1000.))  ## I think floor is better
+    ## The roundign made Dillon much worse, did not affect Busby, and improved Chinook slightly (over vs undershoot).
 
-    kc = pd.Series(alfalfa_kc, index=[d for d in yr_ind if d.day == 15])
+    # kc = pd.Series(alfalfa_kc, index=[d for d in yr_ind if d.day == 15])
+    kc = pd.Series(alfalfa_kc_1, index=[d for d in yr_ind if (d.day == 1) or (d.day == 15)])
     kc = kc.reindex(yr_ind)
     kc.iloc[0] = 0.6
     kc.iloc[-1] = 0.6
@@ -646,5 +672,18 @@ def modified_blaney_criddle_1(clim_db_loc, station, lat_degrees=None, elev=None)
 
 
 if __name__ == '__main__':
+    x1 = np.linspace(0.5, 11.5, 12)
+    # print(x1)
+    x2 = np.linspace(0, 11.5, 24)
+    # print(x2)
+
+    plt.figure()
+    plt.plot(x1+1, alfalfa_kc)
+    plt.plot(x2+1, alfalfa_kc_1)
+    plt.xlabel('month')
+    plt.ylabel('k_c')
+    # plt.vlines([5,10], 0.6, 1.15)
+    plt.grid()
+    plt.show()
     pass
 # ========================= ========================================================

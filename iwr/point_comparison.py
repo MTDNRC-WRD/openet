@@ -20,6 +20,8 @@ from utils.agrimet import MT_STATIONS
 from utils.elevation import elevation_from_coordinate_ee
 from utils.thredds import GridMet
 
+import requests
+
 warnings.filterwarnings(action='once')
 
 large = 22
@@ -47,6 +49,56 @@ plt.rcParams.update(params)
 plt.style.use('seaborn-v0_8-whitegrid')
 sns.set_style("white", {'axes.linewidth': 0.5})
 
+
+def openet_get_fields():
+    # import requests
+
+    # set your API key before making the request
+    header = {"Authorization": 'ZBXxCeBRsSgkeLvsROKVTDS1w9UV0xfOKyEJGTNcEEPT15DQsYfbB0uu1K9w'}
+
+    # endpoint arguments
+    args = {
+        "date_range": [
+            "2018-01-01",
+            "2021-12-31"
+        ],
+        "interval": "monthly",
+        "asset_id": "projects/ee-hehaugen/assets/sweetgrass_fields_sample",  ## ?
+        "attributes": [
+            "FID"
+        ],
+        "reducer": "mean",
+        "model": "Ensemble",
+        "variable": "ETof",
+        "reference_et": "gridMET",
+    }
+
+    # # endpoint arguments
+    # args = {
+    #     "date_range": [
+    #         "2019-01-01",
+    #         "2019-12-31"
+    #     ],
+    #     "interval": "monthly",
+    #     "asset_id": "projects/openet/api_demo_features",
+    #     "attributes": [
+    #         "id"
+    #     ],
+    #     "reducer": "mean",
+    #     "model": "ptJPL",
+    #     "variable": "ET",
+    #     "reference_et": "gridMET",
+    #     "units": "mm"
+    # }
+
+    # query the api
+    resp = requests.post(
+        headers=header,
+        json=args,
+        url="https://openet-api.org/raster/timeseries/multipolygon"
+    )
+
+    print(resp.json())
 
 def field_comparison(shp, etof, out):
     gdf = gpd.read_file(shp)
@@ -120,9 +172,9 @@ def field_comparison(shp, etof, out):
             summary.loc[i, 'geo'] = row['geometry']
             summary.loc[i, 'etof'] = df['etof'].mean()
             summary.loc[i, 'etos'] = grd['ETOS'].mean() ## gridmet et
-        # print(summary)
-    return summary
-        # pass
+        print(summary)
+    # return summary
+        pass
 
 
 def point_comparison_iwr_stations(_dir, meta_csv, out_summary):
@@ -288,6 +340,8 @@ def check_implementation(clim_db_loc, station='USC00242409', data_dir=None,
     lat = df.iloc[0]['LATITUDE']
     lon = df.iloc[0]['LONGITUDE']
     elev = elevation_from_coordinate_ee(lat, lon)
+    # print()
+    # print(elev)
 
     df = df[['TMAX', 'TMIN', 'PRCP']]
 
@@ -297,12 +351,14 @@ def check_implementation(clim_db_loc, station='USC00242409', data_dir=None,
     df = df[['MX', 'MN', 'PP']]
     df['MM'] = (df['MX'] + df['MN']) / 2
 
-    bc, start, end, kc = modified_blaney_criddle_1(clim_db_loc, station[-4:], lat_degrees=lat, elev=elev)
+    bc, start, end, kc = modified_blaney_criddle_1(clim_db_loc, station[-4:],
+                                                   lat_degrees=lat, elev=elev, fullmonth=False)
     # print(bc)
+    print('Season: ', start, ' to ', end)
 
     print(bc['u'])
     bc_pet = bc['u'].sum()
-    print('Should match with first entry under "totals" in IWR: ', bc_pet)
+    # print('Should match with first entry under "totals" in IWR: ', bc_pet)
 
     pass
 
@@ -436,7 +492,8 @@ if __name__ == '__main__':
     shp_ = os.path.join(r, 'sweetgrass_fields_sample.shp')
     etof_ = os.path.join(r, 'sweetgrass_fields_etof')
     out_summary = os.path.join(r, 'sweetgrass_fields_comparison.shp')
-    # field_comparison(shp_, etof_, out_summary) ## out_summary function not working. Nothing is done with resulting geopandas file.
+    # field_comparison(shp_, etof_, out_summary)
+    ## out_summary function not present. Nothing is done with resulting geopandas file.
 
     iwr_data_dir = os.path.join(d, 'from_ghcn')
     stations = os.path.join(d, 'mt_arm_iwr_stations.csv')
@@ -453,18 +510,30 @@ if __name__ == '__main__':
     iwr_clim_db_loc = 'C:/Users/CND571/Documents/IWR/Database/climate.db'
     start, end = '1971-01-01', '2000-12-31'
     # start, end = '1997-01-01', '2006-12-31'
-    ## Beaverhead, Dillon WMCE
-    ## IWR: 23.92, this gives 24.17
+
+    # Beaverhead, Dillon WMCE
+    # IWR elev: 5230
+    # IWR: 23.92, this gives 24.17
+    # print(5230/3.28)
     check_implementation(iwr_clim_db_loc, 'USC00242409', iwr_data_dir, start=start, end=end)
-    ## Bighorn, Busby
-    ## IWR: 26.55, this gives 29.26
+    # Bighorn, Busby
+    # IWR elev: 3430
+    # IWR: 26.55, this gives 29.26
+    # print(3430/3.28)
     check_implementation(iwr_clim_db_loc, 'USC00241297',  iwr_data_dir, start=start, end=end)
-    ## Blaine, Chinook
-    ## IWR: 27.86, this gives 26.31
+    # Blaine, Chinook
+    # IWR elev: 2340
+    # IWR: 27.86, this gives 26.31
+    # print(2340/3.28)
     check_implementation(iwr_clim_db_loc, 'USC00241722', iwr_data_dir, start=start, end=end)
+    # Broadwater, Townsend
+    check_implementation(iwr_clim_db_loc, 'USC00248324', iwr_data_dir, start=start, end=end)
+
 
     ## This line replicates the Denver, CO example from NEH ch 2, appendix A
     # check_implementation_neh_ex('USC00242409', iwr_data_dir, iwr_table, start=start, end=end)
 
     # location_analysis()
+
+    # openet_get_fields()
 # ========================= EOF ====================================================================

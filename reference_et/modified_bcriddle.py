@@ -28,6 +28,7 @@ alfalfa_kc = [0.63, 0.73, 0.86, 0.99, 1.08, 1.13, 1.11, 1.06, 0.99, 0.91, 0.78, 
 alfalfa_kc_1 = [0.6, 0.63, 0.68, 0.73, 0.79, 0.86, 0.92, 0.98, 1.04, 1.08, 1.12, 1.13,
                 1.12, 1.11, 1.09, 1.06, 1.03, 0.99, 0.95, 0.91, 0.85, 0.78, 0.72, 0.64]
 
+
 def get_iwr_db_temp(station):
     """ Returns the monthly mean temperatures from the IWR database as a pandas series given the last 4 digits of an IWR weather station
     as a string """
@@ -42,6 +43,7 @@ def get_iwr_db_temp(station):
                        6: row['T Jun'], 7: row['T Jul'], 8: row['T Aug'], 9: row['T Sep'], 10: row['T Oct'],
                        11: row['T Nov'], 12: row['T Dec']})
     return temps
+
 
 def effective_ppt_table():
     # NEH 2-148, table 2-43
@@ -187,9 +189,9 @@ def modified_blaney_criddle_neh_ex(df, lat_degrees=None, elev=None, season_start
         # this matches IWR database files almost exactly
         t = df['MM'].resample('M').mean()
     t = t.groupby(t.index.month).mean() * 9 / 5 + 32
-    # t0 = pd.Series({1: 24.0, 2: 28.8, 3: 35.6, 4: 43.2, 5: 51.6, 6: 59.4, 7: 65.4, 8: 64.1, 9: 55.4, 10: 45.7, 11: 32.0,
-    #                 12: 24.1})  ## for Dillon station
-    # print('t difference', t-t0) ##
+    # t0 = pd.Series({1: 24.0, 2: 28.8, 3: 35.6, 4: 43.2, 5: 51.6, 6: 59.4, 7: 65.4, 8: 64.1,
+    #                 9: 55.4, 10: 45.7, 11: 32.0, 12: 24.1})  # for Dillon station
+    # print('t difference', t-t0)
 
     p = df['PP'].resample('M').sum()
     ppt_quantiles = pd.DataFrame(np.zeros((12, 1)) * np.nan, index=[x for x in range(1, 13)])
@@ -243,18 +245,18 @@ def modified_blaney_criddle_neh_ex(df, lat_degrees=None, elev=None, season_start
     dates, d_accum, pct_season = [midpoint], [counter], [counter / season_length]
     temps, pct_day_hrs = [temp], [daylight]
 
-    ## This is where we go wrong? Check that end of season is not in between the 15th and the 30th
-    ## Problem does not occur if season start is before the 15th of the month, I don't think.
+    # This is where we go wrong? Check that end of season is not in between the 15th and the 30th
+    # Problem does not occur if season start is before the 15th of the month, I don't think.
 
-    ## Loop searches for another half-month in the same month as the season end, and appends appropriate data.
-    ## Except we don't want that.
+    # Loop searches for another half-month in the same month as the season end, and appends appropriate data.
+    # Except we don't want that.
     for d, v in dtmm.loc[midpoint: season_end].items():
         counter += 1
         if d.day == 15:
             dates.append(d)
             d_accum.append(counter)
             pct_season.append(counter / season_length)
-            ## why are we using mean monthly vs. 15th day mean?
+            # why are we using mean monthly vs. 15th day mean?
             # temps.append(t.loc[d.month]) ## use v here?
             temps.append(v)
             # print(t.loc[d.month], v)
@@ -266,14 +268,14 @@ def modified_blaney_criddle_neh_ex(df, lat_degrees=None, elev=None, season_start
         second_period.append(d)
         d += timedelta(days=1)
 
-    if season_end.day > 15: ## remove last entry above, make sure second period is correct.
+    if season_end.day > 15:  # remove last entry above, make sure second period is correct.
         dates = dates[:-1]
         d_accum = d_accum[:-1]
         pct_season = pct_season[:-1]
         pct_day_hrs = pct_day_hrs[:-1]
         temps = temps[:-1]
 
-        ## start of second period should be first of the month
+        # start of second period should be first of the month
         second_period = []
         d = dates[-1]
         while d.day != 1:
@@ -283,15 +285,15 @@ def modified_blaney_criddle_neh_ex(df, lat_degrees=None, elev=None, season_start
             d += timedelta(days=1)
 
     midpoint = second_period[0] + (second_period[-1] - second_period[0]) / 2
-    t_prev, t_next = t.loc[midpoint.month - 1], t.loc[midpoint.month] ## adjusted to call last month and this one.
+    t_prev, t_next = t.loc[midpoint.month - 1], t.loc[midpoint.month]  # adjusted to call last month and this one.
     remaining_days = len(second_period) + 1  # (midpoint - dates[-1]).days
     month_len = monthrange(2000, midpoint.month)[1]
     month_fraction = remaining_days / month_len
     temp = t_prev + (month_fraction * (t_next - t_prev))
     accum_days_last = (midpoint - season_start).days
 
-    day_prev, day_next = sunshine[midpoint.month - 2], sunshine[midpoint.month - 1] ## adjusted as t above.
-    daylight = (day_prev + (month_fraction * (day_next - day_prev))) * month_fraction ##
+    day_prev, day_next = sunshine[midpoint.month - 2], sunshine[midpoint.month - 1]  # adjusted as t above.
+    daylight = (day_prev + (month_fraction * (day_next - day_prev))) * month_fraction
 
     dates.append(midpoint)
     d_accum.append(accum_days_last)
@@ -300,43 +302,43 @@ def modified_blaney_criddle_neh_ex(df, lat_degrees=None, elev=None, season_start
     pct_day_hrs.append(daylight)
 
     print(len(temps),temps)
-    ## overwriting temps for illustration purposes
+    # overwriting temps for illustration purposes
     temps = [51.1, 56.3, 66.4, 72.8, 71.3, 62.7, 53.5]
     print(len(temps),temps)
 
-    ## error in pct_day_hrs, otherwise good.
+    # error in pct_day_hrs, otherwise good.
     # pct_day_hrs = [1.87, 9.99, 10.07, 10.20, 9.54, 8.39, 6.31]
 
     dates = [pd.to_datetime('2000-{}-{}'.format(d.month, d.day)) for d in dates]
     df = pd.DataFrame(np.array([d_accum, pct_season, temps, pct_day_hrs]).T,
                       columns=['accum_day', 'pct_season', 't', 'p'],
                       index=dates)
-    ## t = mean monthly air temp.
-    ## p = monthly percentage of annual daylight hours
+    # t = mean monthly air temp.
+    # p = monthly percentage of annual daylight hours
 
-    df['f'] = df['t'] * df['p'] / 100.  ## monthly consumptive use factor
+    df['f'] = df['t'] * df['p'] / 100.  # monthly consumptive use factor
 
     df['kt'] = df['t'] * 0.0173 - 0.314
     df['kt'][df['t'] < 36.] = 0.3
 
-    elevation_corr = 1 + (0.1 * np.floor(elev / 1000.))  ## from footnote 3 on IWR results page
+    elevation_corr = 1 + (0.1 * np.floor(elev / 1000.))  # from footnote 3 on IWR results page
 
     kc = pd.Series(alfalfa_kc, index=[d for d in yr_ind if d.day == 15])
     kc = kc.reindex(yr_ind)
     kc.iloc[0] = 0.6
     kc.iloc[-1] = 0.6
     kc = kc.interpolate()
-    df['kc'] = kc.loc[df.index]  ## growth stage from table
-    df['k'] = df['kc'] * elevation_corr * df['kt']  ## empirical crop coefficient, corrected for air temp.
-    df['u'] = df['k'] * df['f']  ## monthly consumptive use, inches
-    df['ref_u'] = df['kt'] * df['f']  ## no crop coefficient or elevation correction.
+    df['kc'] = kc.loc[df.index]  # growth stage from table
+    df['k'] = df['kc'] * elevation_corr * df['kt']  # empirical crop coefficient, corrected for air temp.
+    df['u'] = df['k'] * df['f']  # monthly consumptive use, inches
+    df['ref_u'] = df['kt'] * df['f']  # no crop coefficient or elevation correction.
 
     # rounded = [np.round(ppt * 2) / 2 for ppt in ppt_quantiles.values]
     # ppt_quantiles['eff_ppt'] = [eff_ppt_lookup.loc[r,]]
 
     # print('no elevation correction:', (df['kc'] * df['kt'] * df['f']).sum() )
 
-    # print(df['t']) ## different than reference in database
+    # print(df['t']) ## different from reference in database
 
     print(df)
 
@@ -347,6 +349,7 @@ def modified_blaney_criddle(df, lat_degrees=None, elev=None, season_start=None, 
                             mid_month=False):
     """
     Custom implementation of the SCS Blaney Criddle method.
+    Assumes inout data is in Celsius.
     :param df:
     :param lat_degrees:
     :param elev:
@@ -366,9 +369,9 @@ def modified_blaney_criddle(df, lat_degrees=None, elev=None, season_start=None, 
         # this matches IWR database files almost exactly
         t = df['MM'].resample('M').mean()
     t = t.groupby(t.index.month).mean() * 9 / 5 + 32
-    # t = pd.Series({1: 24.0, 2: 28.8, 3: 35.6, 4: 43.2, 5: 51.6, 6: 59.4, 7: 65.4, 8: 64.1, 9: 55.4, 10: 45.7, 11: 32.0, 12: 24.1}) ## for Dillon station
-    # print('t difference', t-t0) ##
+    # print(t)
 
+    # precipitation data, not used in current calculations
     p = df['PP'].resample('M').sum()
     ppt_quantiles = pd.DataFrame(np.zeros((12, 1)) * np.nan, index=[x for x in range(1, 13)])
     eff_ppt_lookup = effective_ppt_table()
@@ -385,168 +388,35 @@ def modified_blaney_criddle(df, lat_degrees=None, elev=None, season_start=None, 
 
     if not season_start:
         season_start = dtmm[dtmm > 50.].index[0]
+
+        # # calculating season start, method for only monthly data. Above method is close.
+        # month = t[t >= 50].index[0]  # get month when temp gets above 50
+        # month_len = monthrange(2000, month - 1)[1]  # get length of preceding month
+        # season_start1 = datetime(year=2000, month=month - 1, day=15)  # get midpoint of preceding month
+        # # calculate number of days past midpoint of preceding month when we reach average temp of 50
+        # days = round(((50. - t[month - 1]) * month_len) / (t[month] - t[month - 1]))
+        # season_start1 = season_start1 + timedelta(days=days)  # add days
+        # print('season_start1: ', season_start1)
     else:
         season_start = pd.to_datetime(season_start)
 
     if not season_end:
-        dtmn = df['MN'].groupby([df.index.month, df.index.day]).mean() * 9 / 5 + 32
-        yr_ind = pd.date_range('2000-01-01', '2000-12-31', freq='d')
-        dtmn.index = yr_ind
-        season_end = dtmn.loc['2000-07-01':][dtmn < 28.].index[0]
+        # # the daily method yields a very different result from IWR
+        # dtmn = df['MN'].groupby([df.index.month, df.index.day]).mean() * 9 / 5 + 32
+        # yr_ind = pd.date_range('2000-01-01', '2000-12-31', freq='d')
+        # dtmn.index = yr_ind
+        # season_end = dtmn.loc['2000-07-01':][dtmn < 28.].index[0]
+
+        # try this: (gets pretty close to IWR freeze dates)
+        month = t[t >= 53].index[-1]  # get last month when temp gets above 53
+        month_len = monthrange(2000, month)[1]  # get length of month
+        season_end = datetime(year=2000, month=month, day=15)  # get midpoint of month
+        # calculate number of days past midpoint of month when we reach average temp of 53
+        days = round(((53. - t[month]) * month_len) / (t[month + 1] - t[month]))
+        season_end = season_end + timedelta(days=days)  # add days
+        # print(season_end)
     else:
         season_end = pd.to_datetime(season_end)
-
-    season_length = (season_end - season_start).days
-
-    lat = round(lat_degrees)
-    sunshine = lat_to_sunshine[lat]
-
-    first_period = []
-    d = season_start
-    while d.day != 1:
-        first_period.append(d)
-        d += timedelta(days=1)
-
-    midpoint = season_start + (d - season_start) / 2
-    counter = (midpoint - season_start).days
-    t_prev, t_next = t.loc[midpoint.month], t.loc[midpoint.month + 1]
-    month_len = monthrange(2000, midpoint.month)[1]
-    remaining_days = month_len - season_start.day
-    month_fraction = remaining_days / month_len
-    temp = t_prev + (month_fraction * (t_next - t_prev))
-
-    day_prev, day_next = sunshine[midpoint.month - 1], sunshine[midpoint.month]
-    daylight = (day_prev + (month_fraction * (day_next - day_prev))) * month_fraction
-
-    dates, d_accum, pct_season = [midpoint], [counter], [counter / season_length]
-    temps, pct_day_hrs = [temp], [daylight]
-    for d, v in dtmm.loc[midpoint: season_end].items():
-        counter += 1
-        if d.day == 15:
-            dates.append(d)
-            d_accum.append(counter)
-            pct_season.append(counter / season_length)
-            ## why are we using mean monthly vs. 15th day mean?
-            temps.append(t.loc[d.month]) ## use v here?
-            # temps.append(v) ## t vs v makes a tiny, tiny difference: 0.01 inches of total ET.
-            # print(t.loc[d.month], v)
-            pct_day_hrs.append(sunshine[d.month - 1])
-
-    second_period = []
-    d = dates[-1]
-    while d != season_end:
-        second_period.append(d)
-        d += timedelta(days=1)
-
-    ## Adding this section made it a much lower estimate...
-    if season_end.day > 15:  ## remove last entry above, make sure second period is correct.
-        dates = dates[:-1]
-        d_accum = d_accum[:-1]
-        pct_season = pct_season[:-1]
-        pct_day_hrs = pct_day_hrs[:-1]
-        temps = temps[:-1]
-
-        ## start of second period should be first of the month
-        second_period = []
-        d = dates[-1]
-        while d.day != 1:
-            d += timedelta(days=1)
-        while d != season_end:
-            second_period.append(d)
-            d += timedelta(days=1)
-
-    midpoint = second_period[0] + (second_period[-1] - second_period[0]) / 2
-    t_prev, t_next = t.loc[midpoint.month - 1], t.loc[midpoint.month]
-    remaining_days = len(second_period) + 1
-    month_len = monthrange(2000, midpoint.month)[1]
-    month_fraction = remaining_days / month_len
-    temp = t_prev + (month_fraction * (t_next - t_prev))
-    accum_days_last = (midpoint - season_start).days
-
-    day_prev, day_next = sunshine[midpoint.month - 2], sunshine[midpoint.month - 1]
-    daylight = (day_prev + (month_fraction * (day_next - day_prev))) * month_fraction
-
-    dates.append(midpoint)
-    d_accum.append(accum_days_last)
-    pct_season.append(accum_days_last / season_length)
-    temps.append(temp)
-    pct_day_hrs.append(daylight)
-
-    dates = [pd.to_datetime('2000-{}-{}'.format(d.month, d.day)) for d in dates]
-    df = pd.DataFrame(np.array([d_accum, pct_season, temps, pct_day_hrs]).T,
-                      columns=['accum_day', 'pct_season', 't', 'p'],
-                      index=dates)
-    ## t = mean monthly air temp.
-    ## p = monthly percentage of annual daylight hours
-
-    df['f'] = df['t'] * df['p'] / 100. ## monthly consumptive use factor
-
-    df['kt'] = df['t'] * 0.0173 - 0.314
-    df['kt'][df['t'] < 36.] = 0.3
-
-    elevation_corr = 1 + (0.1 * np.floor(elev / 1000.)) ## from footnote 3 on IWR results page
-
-    kc = pd.Series(alfalfa_kc, index=[d for d in yr_ind if d.day == 15])
-    kc = kc.reindex(yr_ind)
-    kc.iloc[0] = 0.6
-    kc.iloc[-1] = 0.6
-    kc = kc.interpolate()
-    df['kc'] = kc.loc[df.index] ## growth stage from table
-    df['k'] = df['kc'] * elevation_corr * df['kt'] ## empirical crop coefficient, corrected for air temp.
-    df['u'] = df['k'] * df['f'] ## monthly consumptive use, inches
-    df['ref_u'] = df['kt'] * df['f'] ## no crop coefficient or elevation correction.
-
-    # rounded = [np.round(ppt * 2) / 2 for ppt in ppt_quantiles.values]
-    # ppt_quantiles['eff_ppt'] = [eff_ppt_lookup.loc[r,]]
-
-    # print('no elevation correction:', (df['kc'] * df['kt'] * df['f']).sum() )
-
-    # print(df['t']) ## different than reference in database
-
-    # print(df)
-
-    return df, season_start, season_end, kc
-
-
-def modified_blaney_criddle_1(clim_db_loc, station, lat_degrees=None, elev=None, fullmonth=False):
-    """
-    Custom implementation of the SCS Blaney Criddle method.
-    Updated to not rely on information outside IWR climate db
-    :param station: last 4 digits of station number
-    :param lat_degrees:
-    :param elev:
-    :param clim_db_loc: path to IWR climate database
-    :return:
-    """
-    ## 2000 is used arbitrarily to get a year's worth of daily time stamps. Right?
-    yr_ind = pd.date_range('2000-01-01', '2000-12-31', freq='d')
-
-    table = Table(clim_db_loc)
-    ## finding correct row in IWR db
-    i = 0
-    while table[i]['Station No'][2:] != station:
-        i += 1
-    row = table[i]
-    print(row['Station Name'])
-    ## loading monthly mean temps from IWR db
-    t = pd.Series({1: row['T Jan'], 2: row['T Feb'], 3: row['T Mar'], 4: row['T Apr'], 5: row['T May'],
-                       6: row['T Jun'], 7: row['T Jul'], 8: row['T Aug'], 9: row['T Sep'], 10: row['T Oct'],
-                       11: row['T Nov'], 12: row['T Dec']})
-    # print(t)
-    season_end = pd.to_datetime(row['Fall mo/dy 28'] + '/2000')  ## average freeze date from database
-
-    ## calculating season start
-    month = t[t >= 50].index[0]  ## get month when temp gets above 50
-    month_len = monthrange(2000, month - 1)[1]  ## get length of preceding month
-    season_start = datetime(year=2000, month=month - 1, day=15)  ## get midpoint of preceding month
-    ## calculate number of days past midpoint of preceding month when we reach average temp of 50
-    days = round(((50. - t[month - 1]) * month_len) / (t[month] - t[month - 1]))
-    season_start = season_start + timedelta(days=days)  ## add days
-
-    if fullmonth:
-        ## something a little weird with start dates/first period... non-inclusive of last day of month?
-        season_start = pd.to_datetime('2000-05-01') ## ex: 4-30 vs 5-01 doesn't change result.
-        season_end = pd.to_datetime('2000-09-30')
 
     season_length = (season_end - season_start).days
 
@@ -562,12 +432,12 @@ def modified_blaney_criddle_1(clim_db_loc, station, lat_degrees=None, elev=None,
     if d != season_start:
         midpoint = season_start + (d - season_start) / 2
         if midpoint.hour != 0:
-            midpoint = midpoint - timedelta(hours=12) ## to avoid splitting a day in half
+            midpoint = midpoint - timedelta(hours=12)  # to avoid splitting a day in half
         counter = (midpoint - season_start).days
         t_prev, t_next = t.loc[midpoint.month], t.loc[midpoint.month + 1]
         month_len = monthrange(2000, midpoint.month)[1]
         interp_fraction = (midpoint.day - 15) / month_len
-        print('interp_fraction 1: ', interp_fraction)
+        # print('interp_fraction 1: ', interp_fraction)
         remaining_days = month_len - season_start.day
         month_fraction = remaining_days / month_len
         temp = t_prev + (interp_fraction * (t_next - t_prev))
@@ -597,14 +467,14 @@ def modified_blaney_criddle_1(clim_db_loc, station, lat_degrees=None, elev=None,
     #     second_period.append(d)
     #     d += timedelta(days=1)
 
-    if season_end.day > 15:  ## remove last entry
+    if season_end.day > 15:  # remove last entry
         dates = dates[:-1]
         d_accum = d_accum[:-1]
         pct_season = pct_season[:-1]
         pct_day_hrs = pct_day_hrs[:-1]
         temps = temps[:-1]
 
-    ## start of second period should always be first of the month
+    # start of second period should always be first of the month
     second_period = []
     d = dates[-1]
     while d.day != 1:
@@ -616,7 +486,7 @@ def modified_blaney_criddle_1(clim_db_loc, station, lat_degrees=None, elev=None,
     if len(second_period) > 0:
         midpoint = second_period[0] + (second_period[-1] - second_period[0]) / 2
         if midpoint.hour != 0:
-            midpoint = midpoint - timedelta(hours=12)  ## to avoid splitting a day in half
+            midpoint = midpoint - timedelta(hours=12)  # to avoid splitting a day in half
     else:
         midpoint = season_end
 
@@ -626,7 +496,7 @@ def modified_blaney_criddle_1(clim_db_loc, station, lat_degrees=None, elev=None,
     month_fraction = remaining_days / month_len
     # prev_month_len = monthrange(2000, midpoint.month - 1)[1] ## do we need this?
     interp_fraction = (midpoint.day + 15) / month_len
-    print('interp_fraction 2: ', interp_fraction)
+    # print('interp_fraction 2: ', interp_fraction)
     temp = t_prev + (interp_fraction * (t_next - t_prev))
     accum_days_last = (midpoint - season_start).days
 
@@ -643,17 +513,194 @@ def modified_blaney_criddle_1(clim_db_loc, station, lat_degrees=None, elev=None,
     df = pd.DataFrame(np.array([d_accum, pct_season, temps, pct_day_hrs]).T,
                       columns=['accum_day', 'pct_season', 't', 'p'],
                       index=dates)
-    ## t = mean air temp by period
-    ## p = percentage of annual daylight hours by period
+    # t = mean monthly air temp.
+    # p = monthly percentage of annual daylight hours
 
-    df['f'] = df['t'] * df['p'] / 100.  ## monthly consumptive use factor
+    df['f'] = df['t'] * df['p'] / 100.  # monthly consumptive use factor
 
     df['kt'] = df['t'] * 0.0173 - 0.314
     df['kt'][df['t'] < 36.] = 0.3
 
-    elevation_corr = 1 + (0.1 * np.floor(elev / 1000.))  ## from footnote 3 on IWR results page
-    # elevation_corr = 1 + (0.1 * round(elev / 1000.))  ## I think floor is better
-    ## The roundign made Dillon much worse, did not affect Busby, and improved Chinook slightly (over vs undershoot).
+    elevation_corr = 1 + (0.1 * np.floor(elev / 1000.))  # from footnote 3 on IWR results page
+
+    kc = pd.Series(alfalfa_kc, index=[d for d in yr_ind if d.day == 15])
+    kc = kc.reindex(yr_ind)
+    kc.iloc[0] = 0.6
+    kc.iloc[-1] = 0.6
+    kc = kc.interpolate()
+    df['kc'] = kc.loc[df.index]  # growth stage from table
+    df['k'] = df['kc'] * elevation_corr * df['kt']  # empirical crop coefficient, corrected for air temp.
+    df['u'] = df['k'] * df['f']  # monthly consumptive use, inches
+    df['ref_u'] = df['kt'] * df['f']  # no crop coefficient or elevation correction.
+
+    # rounded = [np.round(ppt * 2) / 2 for ppt in ppt_quantiles.values]
+    # ppt_quantiles['eff_ppt'] = [eff_ppt_lookup.loc[r,]]
+
+    # print('no elevation correction:', (df['kc'] * df['kt'] * df['f']).sum() )
+
+    # print(df['t']) ## different than reference in database
+
+    # print(df)
+
+    return df, season_start, season_end, kc
+
+
+def modified_blaney_criddle_1(clim_db_loc, station, lat_degrees=None, elev=None, fullmonth=False):
+    """
+    Custom implementation of the SCS Blaney Criddle method.
+    Updated to not rely on information outside IWR climate db
+    IWR climate db is already in Fahrenheit.
+    :param station: last 4 digits of station number
+    :param lat_degrees:
+    :param elev:
+    :param clim_db_loc: path to IWR climate database
+    :return:
+    """
+    # 2000 is used arbitrarily to get a year's worth of daily time stamps. Right?
+    yr_ind = pd.date_range('2000-01-01', '2000-12-31', freq='d')
+
+    table = Table(clim_db_loc)
+    # finding correct row in IWR db
+    i = 0
+    while table[i]['Station No'][2:] != station:
+        i += 1
+    row = table[i]
+    print(row['Station Name'])
+    # loading monthly mean temps from IWR db as dict
+    t = pd.Series({1: row['T Jan'], 2: row['T Feb'], 3: row['T Mar'], 4: row['T Apr'], 5: row['T May'],
+                       6: row['T Jun'], 7: row['T Jul'], 8: row['T Aug'], 9: row['T Sep'], 10: row['T Oct'],
+                       11: row['T Nov'], 12: row['T Dec']})
+    # print(t)
+    season_end = pd.to_datetime(row['Fall mo/dy 28'] + '/2000')  # average freeze date from database
+
+    # # calculating season end?
+    # month = t[t >= 53].index[-1]  # get last month when temp gets above 50
+    # month_len = monthrange(2000, month)[1]  # get length of month
+    # season_end1 = datetime(year=2000, month=month, day=15)  # get midpoint of month
+    # # calculate number of days past midpoint of month when we reach average temp of 50
+    # days = round(((53. - t[month]) * month_len) / (t[month + 1] - t[month]))
+    # season_end1 = season_end1 + timedelta(days=days)  # add days
+    # print(season_end1)
+
+    # calculating season start
+    month = t[t >= 50].index[0]  # get month when temp gets above 50
+    month_len = monthrange(2000, month - 1)[1]  # get length of preceding month
+    season_start = datetime(year=2000, month=month - 1, day=15)  # get midpoint of preceding month
+    # calculate number of days past midpoint of preceding month when we reach average temp of 50
+    days = round(((50. - t[month - 1]) * month_len) / (t[month] - t[month - 1]))
+    season_start = season_start + timedelta(days=days)  # add days
+
+    if fullmonth:
+        # something a little weird with start dates/first period... non-inclusive of last day of month?
+        season_start = pd.to_datetime('2000-04-30') # ex: 4-30 vs 5-01 doesn't change result.
+        season_end = pd.to_datetime('2000-10-01')
+
+    season_length = (season_end - season_start).days
+
+    lat = round(lat_degrees)
+    sunshine = lat_to_sunshine[lat]
+
+    first_period = []
+    d = season_start
+    while d.day != 1:
+        first_period.append(d)
+        d += timedelta(days=1)
+
+    if d != season_start:
+        midpoint = season_start + (d - season_start) / 2
+        if midpoint.hour != 0:
+            midpoint = midpoint - timedelta(hours=12) # to avoid splitting a day in half
+        counter = (midpoint - season_start).days
+        t_prev, t_next = t.loc[midpoint.month], t.loc[midpoint.month + 1]
+        month_len = monthrange(2000, midpoint.month)[1]
+        interp_fraction = (midpoint.day - 15) / month_len
+        # print('interp_fraction 1: ', interp_fraction)
+        remaining_days = month_len - season_start.day
+        month_fraction = remaining_days / month_len
+        temp = t_prev + (interp_fraction * (t_next - t_prev))
+
+        day_prev, day_next = sunshine[midpoint.month - 1], sunshine[midpoint.month]
+        daylight = (day_prev + (interp_fraction * (day_next - day_prev))) * month_fraction
+    else:
+        midpoint = season_start + timedelta(days=15)
+        counter = (midpoint - season_start).days
+        temp = t.loc[midpoint.month]
+        daylight = sunshine[midpoint.month - 1]
+
+    dates, d_accum, pct_season = [midpoint], [counter], [counter / season_length]
+    temps, pct_day_hrs = [temp], [daylight]
+    for d in pd.date_range(midpoint, season_end, freq='d'):
+        counter += 1
+        if d.day == 15:
+            dates.append(d)
+            d_accum.append(counter)
+            pct_season.append(counter / season_length)
+            temps.append(t.loc[d.month])
+            pct_day_hrs.append(sunshine[d.month - 1])
+
+    # second_period = []
+    # d = dates[-1]
+    # while d != season_end:
+    #     second_period.append(d)
+    #     d += timedelta(days=1)
+
+    if season_end.day > 15:  # remove last entry
+        dates = dates[:-1]
+        d_accum = d_accum[:-1]
+        pct_season = pct_season[:-1]
+        pct_day_hrs = pct_day_hrs[:-1]
+        temps = temps[:-1]
+
+    # start of second period should always be first of the month
+    second_period = []
+    d = dates[-1]
+    while d.day != 1:
+        d += timedelta(days=1)
+    while d != season_end:
+        second_period.append(d)
+        d += timedelta(days=1)
+
+    if len(second_period) > 0:
+        midpoint = second_period[0] + (second_period[-1] - second_period[0]) / 2
+        if midpoint.hour != 0:
+            midpoint = midpoint - timedelta(hours=12)  # to avoid splitting a day in half
+    else:
+        midpoint = season_end
+
+    t_prev, t_next = t.loc[midpoint.month - 1], t.loc[midpoint.month]
+    remaining_days = len(second_period) + 1
+    month_len = monthrange(2000, midpoint.month)[1]
+    month_fraction = remaining_days / month_len
+    # prev_month_len = monthrange(2000, midpoint.month - 1)[1] ## do we need this?
+    interp_fraction = (midpoint.day + 15) / month_len
+    # print('interp_fraction 2: ', interp_fraction)
+    temp = t_prev + (interp_fraction * (t_next - t_prev))
+    accum_days_last = (midpoint - season_start).days
+
+    day_prev, day_next = sunshine[midpoint.month - 2], sunshine[midpoint.month - 1]
+    daylight = (day_prev + (interp_fraction * (day_next - day_prev))) * month_fraction
+
+    dates.append(midpoint)
+    d_accum.append(accum_days_last)
+    pct_season.append(accum_days_last / season_length)
+    temps.append(temp)
+    pct_day_hrs.append(daylight)
+
+    dates = [pd.to_datetime('2000-{}-{}'.format(d.month, d.day)) for d in dates]
+    df = pd.DataFrame(np.array([d_accum, pct_season, temps, pct_day_hrs]).T,
+                      columns=['accum_day', 'pct_season', 't', 'p'],
+                      index=dates)
+    # t = mean air temp by period
+    # p = percentage of annual daylight hours by period
+
+    df['f'] = df['t'] * df['p'] / 100.  # monthly consumptive use factor
+
+    df['kt'] = df['t'] * 0.0173 - 0.314
+    df['kt'][df['t'] < 36.] = 0.3
+
+    elevation_corr = 1 + (0.1 * np.floor(elev / 1000.))  # from footnote 3 on IWR results page
+    # elevation_corr = 1 + (0.1 * round(elev / 1000.))  # I think floor is better
+    # The rounding made Dillon much worse, did not affect Busby, and improved Chinook slightly (over vs undershoot).
 
     # kc = pd.Series(alfalfa_kc, index=[d for d in yr_ind if d.day == 15])
     kc = pd.Series(alfalfa_kc_1, index=[d for d in yr_ind if (d.day == 1) or (d.day == 15)])
@@ -661,14 +708,35 @@ def modified_blaney_criddle_1(clim_db_loc, station, lat_degrees=None, elev=None,
     kc.iloc[0] = 0.6
     kc.iloc[-1] = 0.6
     kc = kc.interpolate()
-    df['kc'] = kc.loc[df.index]  ## growth stage from table
-    df['k'] = df['kc'] * elevation_corr * df['kt']  ## empirical crop coefficient, corrected for air temp.
-    df['u'] = df['k'] * df['f']  ## monthly consumptive use, inches
-    df['ref_u'] = df['kt'] * df['f']  ## no crop coefficient or elevation correction.
+    df['kc'] = kc.loc[df.index]  # growth stage from table
+    df['k'] = df['kc'] * elevation_corr * df['kt']  # empirical crop coefficient, corrected for air temp.
+    df['u'] = df['k'] * df['f']  # monthly consumptive use, inches
+    df['ref_u'] = df['kt'] * df['f']  # no crop coefficient or elevation correction.
 
     # print(df)
 
-    return df, season_start, season_end, kc
+    # Effective Precip Spaghetti!
+
+    # From NEH Ch2 Table 2-43
+    table = effective_ppt_table()
+    # Keys are water storage depth in inches. Where is that information?
+    factors = {0.75: 0.72, 1.0: 0.77, 1.5: 0.86, 2.0: 0.93, 2.5: 0.97, 3.0: 1.00,
+               4.0: 1.02, 5.0: 1.04, 6.0: 1.06, 7.0: 1.07}
+    # how to round to nearest key in dictionary?
+    wsd = 3.3  # Assume default of 3.
+    key = min(factors.keys(), key=lambda x: abs(x-wsd))
+    factor = factors[key]
+    # Get monthly ET, round to nearest 1
+    et = 4.98
+    etr = round(et)  # should be integer now
+    # Get monthly mean precip, round to nearest 0.5
+    pm = 3.3
+    pmr = (round(pm * 2) / 2)
+
+    # Not sure that I have enough information to actually use the factor...
+    ep = factor * table[str(etr)][pmr]  # 5 and 3.5 should yield 2.48... And it does! :)
+    print(ep)
+    return df, season_start, season_end, kc, ep
 
 
 if __name__ == '__main__':
@@ -684,6 +752,7 @@ if __name__ == '__main__':
     plt.ylabel('k_c')
     # plt.vlines([5,10], 0.6, 1.15)
     plt.grid()
-    plt.show()
+    # plt.show()
+
     pass
 # ========================= ========================================================

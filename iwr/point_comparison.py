@@ -17,7 +17,7 @@ from reference_et.rad_utils import extraterrestrial_r, calc_rso
 from utils.agrimet import load_stations
 from utils.agrimet import Agrimet
 from utils.agrimet import MT_STATIONS
-from utils.elevation import elevation_from_coordinate_ee
+from utils.elevation import elevation_from_coordinate
 from utils.thredds import GridMet
 
 import requests
@@ -50,46 +50,37 @@ plt.style.use('seaborn-v0_8-whitegrid')
 sns.set_style("white", {'axes.linewidth': 0.5})
 
 
-def openet_get_fields():
-    # import requests
+def openet_get_fields(fields, start, end, et_too=False,
+                      api_key='ZBXxCeBRsSgkeLvsROKVTDS1w9UV0xfOKyEJGTNcEEPT15DQsYfbB0uu1K9w'):
+    """ Uses OpenET API multipolygon timeseries endpoint to get etof data given a Google Earth Engine asset.
+    Prints the url, click link to download csv file; link lasts 5 minutes.
+    :fields: path to gee asset, form of 'projects/cloud_project/assets/asset_filename'
+    :start: beginning of period of study, 'YYYY-MM-DD' format
+    :end: end of period of study, 'YYYY-MM-DD' format
+    :et_too: if True, also get link for downloading OpenET ensemble ET over same time period and set of fields
+    :api_key: from user's OpenET account, Hannah's is default
+    """
 
     # set your API key before making the request
-    header = {"Authorization": 'ZBXxCeBRsSgkeLvsROKVTDS1w9UV0xfOKyEJGTNcEEPT15DQsYfbB0uu1K9w'}
+    header = {"Authorization": api_key}
 
     # endpoint arguments
     args = {
         "date_range": [
-            "2018-01-01",
-            "2021-12-31"
+            start,
+            end
         ],
         "interval": "monthly",
-        "asset_id": "projects/ee-hehaugen/assets/sweetgrass_fields_sample",  ## ?
+        "asset_id": fields,
         "attributes": [
             "FID"
         ],
         "reducer": "mean",
         "model": "Ensemble",
-        "variable": "ETof",
+        "variable": "ETof",  # "ETof" or "ET"
         "reference_et": "gridMET",
+        "units": "in"
     }
-
-    # # endpoint arguments
-    # args = {
-    #     "date_range": [
-    #         "2019-01-01",
-    #         "2019-12-31"
-    #     ],
-    #     "interval": "monthly",
-    #     "asset_id": "projects/openet/api_demo_features",
-    #     "attributes": [
-    #         "id"
-    #     ],
-    #     "reducer": "mean",
-    #     "model": "ptJPL",
-    #     "variable": "ET",
-    #     "reference_et": "gridMET",
-    #     "units": "mm"
-    # }
 
     # query the api
     resp = requests.post(
@@ -97,29 +88,46 @@ def openet_get_fields():
         json=args,
         url="https://openet-api.org/raster/timeseries/multipolygon"
     )
-
     print(resp.json())
 
-def field_comparison(shp, etof, out):
+    if et_too:
+        # getting et variable too, in separate file.
+        args.update({"variable": "ET"})
+        resp = requests.post(
+            headers=header,
+            json=args,
+            url="https://openet-api.org/raster/timeseries/multipolygon"
+        )
+        print(resp.json())
+
+    pass
+
+
+def field_comparison(shp, start, end, etof, out):
+    # suggestion in memo: use gridmet for ET, then OpenET for crop coefficient (etof).
     gdf = gpd.read_file(shp)
-    start, end = '2016-01-01', '2021-12-31'
+
+    # loading in OpenET data from files. - do we not need the et, just the etof?
+    file = pd.read_csv(etof, index_col=['FID', 'time'], date_format="%Y-%m-%d").sort_index()
 
     summary = deepcopy(gdf)
-    summary['etos'] = [-99.99 for _ in summary['FID']]
-    summary['etbc'] = [-99.99 for _ in summary['FID']]
+    summary['etos'] = [-99.99 for _ in summary['FID']]  # gridMET seasonal ET
+    summary['etbc'] = [-99.99 for _ in summary['FID']]  # blaney criddle ET based on gridMET weather data
+    summary['etof'] = [-99.99 for _ in summary['FID']]  # crop coefficient/etof from OpenET ensemble
+    summary['etcu'] = [-99.99 for _ in summary['FID']]  # consumptive use calculated from gridMET ET
     summary['geo'] = [None for _ in summary['FID']]
     idx = max(summary.index.values) + 1
 
-    ct = 0
     for i, row in gdf.iterrows():
-        file_ = os.path.join(etof, str(row['FID']).rjust(3, '0'))
+        # Loading in gridMET
         lon, lat = row.geometry.centroid.x, row.geometry.centroid.y
-        elev = elevation_from_coordinate_ee(lat, lon)
+        elev = elevation_from_coordinate(lat, lon)
+
         gridmet = GridMet('pet', start=start, end=end,
-                          lat=lat, lon=lon)
-        grd = gridmet.get_point_timeseries()  ## initialize df with first time series
+                          lat=lat, lon=lon)  # pet is grass, etr is alfalfa. Alfalfa gives a much higher et estimate.
+        grd = gridmet.get_point_timeseries()  # initialize df with first time series
         grd = grd.rename(columns={'pet': 'ETOS'})
-        for var, _name in zip(['tmmn', 'tmmx', 'pr'], ['MN', 'MX', 'PP']):  ## collect additional time series
+        for var, _name in zip(['tmmn', 'tmmx', 'pr'], ['MN', 'MX', 'PP']):  # collect additional time series
             ts = GridMet(var, start=start, end=end,
                          lat=lat, lon=lon).get_point_timeseries()
             if 'tm' in var:
@@ -127,14 +135,14 @@ def field_comparison(shp, etof, out):
 
             grd[_name] = ts
 
-        grd['MM'] = (grd['MN'] + grd['MX']) / 2
-        bc, start1, end1, kc = modified_blaney_criddle(grd, lat, elev)
-        ## start and end were being overwritten by the return of the mbc function. They should not be.
-        ## renamed to start1 and end1
+        # Calculating bc seasonal ET
+        grd['MM'] = (grd['MN'] + grd['MX']) / 2  # gridmet units are in mm and degrees celsius, I think.
+        bc, start1, end1, kc = modified_blaney_criddle(grd, lat, elev, season_start='2000-05-09',
+                                                       season_end='2000-09-19', mid_month=True)
 
         bc_pet = bc['u'].sum()
-        summary.loc[i, 'etbc'] = bc_pet
 
+        # Masking daily gridMET data to growing season
         grd['mday'] = ['{}-{}'.format(x.month, x.day) for x in grd.index]
         target_range = pd.date_range('2000-{}-{}'.format(start1.month, start1.day),
                                      '2000-{}-{}'.format(end1.month, end1.day))
@@ -142,8 +150,12 @@ def field_comparison(shp, etof, out):
         grd['mask'] = [1 if d in accept else 0 for d in grd['mday']]
         grd = grd[grd['mask'] == 1]
 
-        df = pd.read_csv(file_, index_col=0, parse_dates=True) ## monthly ET, from OpenET?
-        df = df.rename(columns={list(df.columns)[0]: 'etof'})
+        grd['ETOS'] = grd['ETOS'] / 25.4  # daily ET, mm to in
+        # Sum over the season, get total seasonal consumptive use by year
+        et_by_year = grd.groupby(grd.index.year)['ETOS'].sum()
+
+        # Loading in OpenET eotf/kc
+        df = file.loc[row['FID']]
         r_index = pd.date_range('2016-01-01', '2021-12-31', freq='D')
         df = df.reindex(r_index)
         df = df.interpolate()
@@ -153,28 +165,66 @@ def field_comparison(shp, etof, out):
         accept = ['{}-{}'.format(x.month, x.day) for x in target_range]
         df['mask'] = [1 if d in accept else 0 for d in df['mday']]
         df = df[df['mask'] == 1]
-        if isinstance(row['geometry'], MultiPolygon): ## multi-part fields
+
+        # getting effective precip and carryover based on county and irrigation type
+        if row['mf'] == 0.675:  # Park County
+            if row['IType'] == 'P':  # center pivot, low net irrigation
+                eff_precip = 3.86
+                carryover = 0.5
+            else:  # other (ex: flood), high net irrigation
+                eff_precip = 5.16
+                carryover = 2
+        elif row['mf'] == 0.494:  # Sweet Grass County
+            if row['IType'] == 'P':
+                eff_precip = 4.91
+                carryover = 0.5
+            else:
+                eff_precip = 3.68
+                carryover = 2
+        else:
+            print("Wrong county!")
+            eff_precip = 0
+            if row['IType'] == 'P':
+                carryover = 0.5
+            else:
+                carryover = 2
+
+        # calculating consumptive use
+        # average seasonal ET times crop coefficient minus effective precip and carryover
+        cu = (et_by_year.mean() * df['etof'].mean()) - eff_precip - carryover
+
+        if isinstance(row['geometry'], MultiPolygon):  # multi-part fields
             first = True
             for g in row['geometry'].geoms:
                 if first:
                     summary.loc[i, 'geo'] = g
+                    summary.loc[i, 'etos'] = et_by_year.mean()
+                    summary.loc[i, 'etbc'] = bc_pet
                     summary.loc[i, 'etof'] = df['etof'].mean()
-                    summary.loc[i, 'etos'] = grd['ETOS'].mean() ## gridmet et
+                    summary.loc[i, 'etcu'] = cu
 
                     first = False
-                else: ## adding additional parts of fields to end of file?
+                else:  # Breaking up multipolygons; adding additional parts of fields to end of file
                     summary.loc[idx] = row
                     summary.loc[idx, 'geo'] = g
+                    summary.loc[idx, 'etos'] = et_by_year.mean()
+                    summary.loc[i, 'etbc'] = bc_pet
                     summary.loc[idx, 'etof'] = df['etof'].mean()
-                    summary.loc[idx, 'etos'] = grd['ETOS'].mean() ## gridmet et
+                    summary.loc[idx, 'etcu'] = cu
+
                     idx += 1
         else:
             summary.loc[i, 'geo'] = row['geometry']
+            summary.loc[i, 'etos'] = et_by_year.mean()
+            summary.loc[i, 'etbc'] = bc_pet
             summary.loc[i, 'etof'] = df['etof'].mean()
-            summary.loc[i, 'etos'] = grd['ETOS'].mean() ## gridmet et
-        print(summary)
-    # return summary
-        pass
+            summary.loc[i, 'etcu'] = cu
+        # "progress bar"
+        if i % 5 == 0:
+            print(i, '/', idx)
+    summary = gpd.GeoDataFrame(summary.drop(columns=['geometry']), geometry='geo')
+    summary.to_file(out)
+    pass
 
 
 def point_comparison_iwr_stations(_dir, meta_csv, out_summary):
@@ -256,10 +306,10 @@ def point_comparison_agrimet(station_dir, out_figs, out_shp):
         coords = meta['geometry']['coordinates']
         geo = Point(coords)
         coord_rads = np.array(coords) * np.pi / 180
-        elev = elevation_from_coordinate_ee(coords[1], coords[0])
+        elev = elevation_from_coordinate(coords[1], coords[0])
         # df = pd.read_csv(f, index_col=0, parse_dates=True,
         #                  header=0, skiprows=[1, 2, 3]) ## removed infer_datetime_format
-        ## load from website instead:
+        # load from website instead:
         df = Agrimet(station=sid, region=stations[sid]['properties']['region'],
                    start_date='2000-01-01', end_date='2023-12-31').fetch_met_data() ## correct daterange?
         df.columns = df.columns.droplevel([1, 2]) ## remove multiindex
@@ -272,7 +322,7 @@ def point_comparison_agrimet(station_dir, out_figs, out_shp):
         df['ETRS'] = df['ETOS'] * 1.2
 
         try:
-            bc, start, end, kc = modified_blaney_criddle(df, coords[1], elev)
+            bc, start, end, kc = modified_blaney_criddle(df, coords[1], elev, mid_month=True)
         except IndexError:
             print(sid, 'failed')
             continue
@@ -329,7 +379,7 @@ def point_comparison_agrimet(station_dir, out_figs, out_shp):
 
 
 def check_implementation(clim_db_loc, station='USC00242409', data_dir=None,
-                         start='1970-01-01', end='2000-12-31'):
+                         start='1970-01-01', end='2000-12-31', management_factor=None):
 
     _file = os.path.join(data_dir, '{}.csv'.format(station))
     df = pd.read_csv(_file)
@@ -339,7 +389,7 @@ def check_implementation(clim_db_loc, station='USC00242409', data_dir=None,
 
     lat = df.iloc[0]['LATITUDE']
     lon = df.iloc[0]['LONGITUDE']
-    elev = elevation_from_coordinate_ee(lat, lon)
+    elev = elevation_from_coordinate(lat, lon)
     # print()
     # print(elev)
 
@@ -351,14 +401,31 @@ def check_implementation(clim_db_loc, station='USC00242409', data_dir=None,
     df = df[['MX', 'MN', 'PP']]
     df['MM'] = (df['MX'] + df['MN']) / 2
 
-    bc, start, end, kc = modified_blaney_criddle_1(clim_db_loc, station[-4:],
-                                                   lat_degrees=lat, elev=elev, fullmonth=False)
     # print(bc)
-    print('Season: ', start, ' to ', end)
+    print()
+    print('Using IWR database:')
+    bc1, start1, end1, kc1 = modified_blaney_criddle_1(clim_db_loc, station[-4:],
+                                                       lat_degrees=lat, elev=elev, fullmonth=False)
 
-    print(bc['u'])
-    bc_pet = bc['u'].sum()
+    print('Season: ', start1.date(), ' to ', end1.date())
+    if management_factor:
+        print('kc = ', bc1['kc'].mean() * management_factor)
+    # print(bc1['u'])
+    bc_pet1 = bc1['u'].sum()
+    print(bc_pet1)
     # print('Should match with first entry under "totals" in IWR: ', bc_pet)
+
+    print()
+    print('Using daily data:')
+    bc, start, end, kc = modified_blaney_criddle(df, lat_degrees=lat, elev=elev,
+                                                 season_start=start1, season_end=end1, mid_month=True)
+    # bc, start, end, kc = modified_blaney_criddle(df, lat_degrees=lat, elev=elev, mid_month=True)
+
+    print('Season: ', start.date(), ' to ', end.date())
+    if management_factor:
+        print('kc = ', bc['kc'].mean() * management_factor)
+    # print(bc['u'])
+    print(bc['u'].sum())
 
     pass
 
@@ -383,7 +450,7 @@ def check_implementation_neh_ex(station='USC00242409', data_dir=None, iwr_table=
     df = df[['MX', 'MN', 'PP']]
     df['MM'] = (df['MX'] + df['MN']) / 2
 
-    bc, start, end, kc = modified_blaney_criddle_neh_ex(df, lat, elev,
+    bc, start, end, kc, ep = modified_blaney_criddle_neh_ex(df, lat, elev,
                                                  season_start='2000-04-24',
                                                  season_end='2000-10-25',
                                                  mid_month=True)
@@ -396,91 +463,121 @@ def check_implementation_neh_ex(station='USC00242409', data_dir=None, iwr_table=
     pass
 
 
-def location_analysis():
-    #### Investigating the geojson file Jack sent me.
+def plot_field_comparison(field_comp_result,data_dir):
+    # Loading shapefile for field_comparison results
+    gdf = gpd.read_file(field_comp_result)
+    print("gdf columns ", gdf.columns)
 
-    stations_davd = pd.read_csv('C:/Users/CND571/Documents/Data/mt_arm_iwr_stations.csv')
-    stations_jack = gpd.read_file('C:/Users/CND571/Downloads/iwr_stations.geojson')
+    # Determine crop coefficient based on management factor
+    kc = {0.675: 0.729, 0.494: 0.534}
+    gdf['dnrc_kc'] = [kc[x] for x in gdf['mf']]
 
-    print(stations_jack['station_no'])
+    # print(len(gdf['etos'].unique()))  # 18, for the number of gridMET stations in study area.
+    # print(gdf['etos'].unique())
 
-    # print(stations_jack.iloc[41]) ## 41 is Dillon
-    ## This line doesn't work, nuances make station names different.
-    # stations_jack = stations_jack.loc[stations_jack['station_name'].isin(stations_davd['NAME'])]
+    # Color bar limits for plotting crop coefficient and seasonal ET
+    vals_kc = [0.33, 1]  # possible range: 0-1
+    vals_et = [0, 25]  # units: in
 
-    ## calling last four digits of station id
-    stations_jack['ids'] = stations_jack['station_no']
-    stations_davd['ids'] = stations_davd['STAID']
-    for i in range(len(stations_jack)):
-        stations_jack['ids'][i] = stations_jack['station_no'].iloc[i][2:]
-    for i in range(len(stations_davd)):
-        stations_davd['ids'][i] = stations_davd['STAID'].iloc[i][7:]
+    # Loading in Ketchcum 2022 memo data
+    r = os.path.join(data_dir, 'comparison_data')
+    file1 = os.path.join(r, 'sweetgrass_fields_comparison_et_cu.shp')
+    gdf1 = gpd.read_file(file1)
+    print("gdf1 columns ", gdf1.columns)
+    file2 = os.path.join(r, 'sweetgrass_fields_comparison_etof.shp')
+    gdf2 = gpd.read_file(file2)
+    print("gdf2 columns ", gdf2.columns)
+    # recovering gridMET seasonal ET from David's file
+    etos_gdf1 = gdf1['et'] / gdf2['etof']
 
-    stations_davd.sort_values(by=['ids'], inplace=True)
-    stations_jack.sort_values(by=['ids'], inplace=True)
+    print()
+    print('Min and Max gridMET ET:')
+    print(gdf['etos'].min(), gdf['etos'].max())
+    print(etos_gdf1.min(), etos_gdf1.max())
+    print()
+    print('Min and Max OpenET crop coefficients:')
+    print(gdf['etof'].min(), gdf['etof'].max())
+    print(gdf2['etof'].min(), gdf2['etof'].max())
 
-    stations_jack_bth = stations_jack.loc[stations_jack['ids'].isin(stations_davd['ids'])]
-    stations_davd_bth = stations_davd.loc[stations_davd['ids'].isin(stations_jack['ids'])]
+    # # Field plots, DNRC vs Hannah's new data
+    # fig, axes = plt.subplots(2, 2, figsize=(20, 8))
+    # axes[0, 0].set_title('(S-3) OpenET Crop Coefficient')
+    # gdf.plot(ax=axes[0, 0], column='etof', cmap='viridis_r', legend=True,
+    #          legend_kwds={"shrink": 0.8}, vmin=vals_kc[0], vmax=vals_kc[1])
+    #
+    # axes[1, 0].set_title('(S-4) OpenET Crop Coefficient')
+    # gdf.plot(ax=axes[1, 0], column='dnrc_kc', cmap='viridis_r', legend=True,
+    #          legend_kwds={"shrink": 0.8}, vmin=vals_kc[0], vmax=vals_kc[1])
+    #
+    # axes[0, 1].set_title('(S-5) OpenET Consumptive Use [in]')
+    # gdf.plot(ax=axes[0, 1], column='etcu', cmap='RdYlBu', legend=True,
+    #          legend_kwds={"shrink": 0.8},  vmin=vals_et[0], vmax=vals_et[1])
+    #
+    # axes[1, 1].set_title('(S-6) DNRC Consumptive Use [in]')
+    # gdf.plot(ax=axes[1, 1], column='dnrc_cu', cmap='RdYlBu', legend=True,
+    #          legend_kwds={"shrink": 0.8}, vmin=vals_et[0], vmax=vals_et[1])
+    #
+    # axes[0, 0].xaxis.set_tick_params(labelbottom=False)
+    # axes[0, 0].yaxis.set_tick_params(labelleft=False)
+    # axes[1, 0].xaxis.set_tick_params(labelbottom=False)
+    # axes[1, 0].yaxis.set_tick_params(labelleft=False)
+    # axes[0, 1].xaxis.set_tick_params(labelbottom=False)
+    # axes[0, 1].yaxis.set_tick_params(labelleft=False)
+    # axes[1, 1].xaxis.set_tick_params(labelbottom=False)
+    # axes[1, 1].yaxis.set_tick_params(labelleft=False)
 
-    stations_jack_dif = stations_jack.loc[~stations_jack['ids'].isin(stations_davd['ids'])]
-    stations_davd_dif = stations_davd.loc[~stations_davd['ids'].isin(stations_jack['ids'])]
+    # Histograms, DNRC vs Hannah's new data
+    # fig1, axes1 = plt.subplots(2, 2, figsize=(20, 8))
+    # axes1[0, 0].set_title('(S-3) OpenET Crop Coefficient')
+    # gdf['etof'].plot.hist(ax=axes1[0, 0], range=(0.33, 1.0), bins=20)
+    #
+    # axes1[1, 0].set_title('(S-4) OpenET Crop Coefficient')
+    # gdf['dnrc_kc'].plot.hist(ax=axes1[1, 0], range=(0.33, 1.0), bins=20)
+    #
+    # axes1[0, 1].set_title('(S-5) OpenET Consumptive Use [in]')
+    # gdf['etcu'].plot.hist(ax=axes1[0, 1], range=(1.5, 21.5), bins=20)
+    #
+    # axes1[1, 1].set_title('(S-6) DNRC Consumptive Use [in]')
+    # gdf['dnrc_cu'].plot.hist(ax=axes1[1, 1], range=(1.5, 21.5), bins=20)
 
-    # for i in range(len(stations_davd_bth)): ## THese are indeed the same.
-    #     print(stations_jack_bth.ids.iloc[i], stations_jack_bth.station_name.iloc[i], ',',
-    #           stations_davd_bth.ids.iloc[i], stations_davd_bth.NAME.iloc[i])
+    # # Ketchum 2022 memo data vs Hannah's new data, just for consumptive use
+    fig2, axes2 = plt.subplots(2, 1, figsize=(10, 8))
+    axes2[0].set_title('(S-5) Hannah OpenET Consumptive Use [in]')
+    gdf.plot(ax=axes2[0], column='etcu', cmap='RdYlBu', legend=True,
+              legend_kwds={"shrink": 0.8}, vmin=vals_et[0], vmax=vals_et[1])
 
-    # for i in range(len(stations_jack_dif)):  ## checking how different things are
-    #     if i < len(stations_davd_dif):
-    #         print(stations_jack_dif.ids.iloc[i], stations_jack_dif.station_name.iloc[i], ',',
-    #               stations_davd_dif.ids.iloc[i], stations_davd_dif.NAME.iloc[i])
-    #     else:
-    #         print(stations_jack_dif.ids.iloc[i], stations_jack_dif.station_name.iloc[i])
+    axes2[1].set_title('(S-5) David OpenET Consumptive Use [in]')
+    gdf1.plot(ax=axes2[1], column='openet_cu', cmap='RdYlBu', legend=True,
+              legend_kwds={"shrink": 0.8}, vmin=vals_et[0], vmax=vals_et[1])
 
-    # print('stations_davd')
-    # print(len(stations_davd))
-    # print(stations_davd.PACKAGED.unique())
-    # print(stations_davd.loc[stations_davd['PACKAGED']=='exists in db']) ## only 51 in database?
-    # print(stations_davd.geometry)
+    axes2[0].xaxis.set_tick_params(labelbottom=False)
+    axes2[0].yaxis.set_tick_params(labelleft=False)
+    axes2[1].xaxis.set_tick_params(labelbottom=False)
+    axes2[1].yaxis.set_tick_params(labelleft=False)
 
-    # print('stations_jack')
-    # print(stations_jack.geometry) ## overlap of 119 with the same ID.
+    # Histograms, Ketchum 2022 memo data vs Hannah's new data
+    fig3, axes3 = plt.subplots(2, 3, figsize=(25, 8))
+    axes3[0, 0].set_title('Hannah OpenET Consumptive Use [in]')
+    gdf['etcu'].plot.hist(ax=axes3[0, 0], range=(1.5, 21.5))
 
-    jack_lon = np.asarray(stations_jack_bth.geometry.x)  ## dtype == geometry
-    jack_lat = np.asarray(stations_jack_bth.geometry.y)
+    axes3[1, 0].set_title('David OpenET Consumptive Use [in]')
+    gdf1['openet_cu'].plot.hist(ax=axes3[1, 0], range=(1.5, 21.5))
 
-    davd_lon = np.asarray(stations_davd_bth.LON)
-    davd_lat = np.asarray(stations_davd_bth.LAT)
+    axes3[0, 1].set_title('Hannah gridMET reference ET [in]')
+    gdf['etos'].plot.hist(ax=axes3[0, 1], range=(23, 28))
 
-    jack_lon_d = stations_jack_dif.geometry.x  ## dtype == geometry
-    jack_lat_d = stations_jack_dif.geometry.y
+    axes3[1, 1].set_title('David gridMET reference ET [in]')
+    etos_gdf1.plot.hist(ax=axes3[1, 1], range=(23, 28))
 
-    davd_lon_d = stations_davd_dif.LON
-    davd_lat_d = stations_davd_dif.LAT
+    axes3[0, 2].set_title('Hannah OpenET crop coefficient')
+    gdf['etof'].plot.hist(ax=axes3[0, 2], range=(0.33, 1.0))
 
-    # print(len(jack_lon), len(davd_lon))
-    # print(len(jack_lon_d), len(davd_lon_d))
+    axes3[1, 2].set_title('David OpenET crop coefficient')
+    gdf2['etof'].plot.hist(ax=axes3[1, 2], range=(0.33, 1.0))
 
-    # print(jack_lat[:5], davd_lat[:5])
-
-    plt.figure()
-    plt.title('132 stations: overlap between stations in David\'s dataset (162) and IWR database/MT ARM (180)')
-    plt.scatter(davd_lon, davd_lat, label='David overlap')
-    plt.scatter(jack_lon, jack_lat, label='Jack overlap')
-    plt.scatter(davd_lon_d, davd_lat_d, marker='^', label='David unique')
-    plt.scatter(jack_lon_d, jack_lat_d, marker='^', label='Jack unique')
-    plt.legend()
-    plt.grid()
     plt.show()
 
-    # plt.figure()
-    # plt.title("difference in longitude value")
-    # plt.hist(davd_lon - jack_lon)
-    # plt.show()
-    #
-    # plt.figure()
-    # plt.title("difference in latitude value")
-    # plt.hist(davd_lat - jack_lat)
-    # plt.show()
+    pass
 
 
 if __name__ == '__main__':
@@ -488,52 +585,60 @@ if __name__ == '__main__':
     if not os.path.exists(d):
         d = 'C:/Users/CND571/Documents/Data'
 
+    gee_asset = "projects/ee-hehaugen/assets/sweetgrass_fields_sample"
+    start_pos = "2016-01-01"
+    end_pos = "2021-12-31"
+    # openet_get_fields(gee_asset, start_pos, end_pos)
+
     r = os.path.join(d, 'comparison_data')
     shp_ = os.path.join(r, 'sweetgrass_fields_sample.shp')
-    etof_ = os.path.join(r, 'sweetgrass_fields_etof')
-    out_summary = os.path.join(r, 'sweetgrass_fields_comparison.shp')
-    # field_comparison(shp_, etof_, out_summary)
-    ## out_summary function not present. Nothing is done with resulting geopandas file.
+    # etof_ = os.path.join(r, 'sweetgrass_fields_etof')
+    # out_summary = os.path.join(r, 'sweetgrass_fields_comparison.shp')
+    etof_ = 'C:/Users/CND571/Downloads/ensemble_monthly_etof.csv'
+    out_summary = 'C:/Users/CND571/Downloads/fields_comparison_01262024.shp'
+    # field_comparison(shp_, start_pos, end_pos, etof_, out_summary)  # Takes about 25 minutes to run.
+
+    plot_field_comparison(out_summary, d)
 
     iwr_data_dir = os.path.join(d, 'from_ghcn')
     stations = os.path.join(d, 'mt_arm_iwr_stations.csv')
     comp = os.path.join(d, 'iwr_gridmet_comparison.shp')
-    # point_comparison_iwr_stations(iwr_data_dir, stations, comp) ## this appears to have worked.
-    ## about 23 stations have exceptions. how big of a problem is this?
+    # point_comparison_iwr_stations(iwr_data_dir, stations, comp)
 
     _dir = os.path.join(d, 'agrimet/mt_stations')
     fig_dir = os.path.join(d, 'agrimet/comparison_figures')
     out_shp = os.path.join(d, 'agrimet/shapefiles/comparison.shp')
-    # point_comparison_agrimet(station_dir=_dir, out_figs=fig_dir, out_shp=out_shp) ## need to switch files.
+    # point_comparison_agrimet(station_dir=_dir, out_figs=fig_dir, out_shp=out_shp) ## need to switch files?
 
     iwr_table = None
     iwr_clim_db_loc = 'C:/Users/CND571/Documents/IWR/Database/climate.db'
-    start, end = '1971-01-01', '2000-12-31'
-    # start, end = '1997-01-01', '2006-12-31'
+    start, end = '1971-01-01', '2000-12-31'  # time period used in IWR db
+    # start, end = '1997-01-01', '2006-12-31'  # time period used in memo
 
-    # Beaverhead, Dillon WMCE
-    # IWR elev: 5230
-    # IWR: 23.92, this gives 24.17
-    # print(5230/3.28)
-    check_implementation(iwr_clim_db_loc, 'USC00242409', iwr_data_dir, start=start, end=end)
-    # Bighorn, Busby
-    # IWR elev: 3430
-    # IWR: 26.55, this gives 29.26
-    # print(3430/3.28)
-    check_implementation(iwr_clim_db_loc, 'USC00241297',  iwr_data_dir, start=start, end=end)
-    # Blaine, Chinook
-    # IWR elev: 2340
-    # IWR: 27.86, this gives 26.31
-    # print(2340/3.28)
-    check_implementation(iwr_clim_db_loc, 'USC00241722', iwr_data_dir, start=start, end=end)
-    # Broadwater, Townsend
-    check_implementation(iwr_clim_db_loc, 'USC00248324', iwr_data_dir, start=start, end=end)
+    # # Checking individual stations' relationship to IWR results. (County, Station)
 
+    # # Beaverhead, Dillon WMCE
+    # # IWR elev: 5230
+    # # print(5230/3.28)
+    # check_implementation(iwr_clim_db_loc, 'USC00242409', iwr_data_dir, start=start, end=end)
+    # # Bighorn, Busby
+    # # IWR elev: 3430
+    # # print(3430/3.28)
+    # check_implementation(iwr_clim_db_loc, 'USC00241297',  iwr_data_dir, start=start, end=end)
+    # # Blaine, Chinook
+    # # IWR elev: 2340
+    # # print(2340/3.28)
+    # check_implementation(iwr_clim_db_loc, 'USC00241722', iwr_data_dir, start=start, end=end)
+    # # Broadwater, Townsend
+    # check_implementation(iwr_clim_db_loc, 'USC00248324', iwr_data_dir, start=start, end=end)
 
-    ## This line replicates the Denver, CO example from NEH ch 2, appendix A
+    # # IWR stations used in Ketchum 2022 memo:
+    # # Park, Livingston (12S, not FAA?)
+    # check_implementation(iwr_clim_db_loc, 'USC00245080', iwr_data_dir, start=start, end=end, management_factor=0.675)
+    # # Sweet Grass, Big Timber
+    # check_implementation(iwr_clim_db_loc, 'USC00240780', iwr_data_dir, start=start, end=end, management_factor=0.494)
+
+    # This line replicates the Denver, CO example from NEH ch 2, appendix A
     # check_implementation_neh_ex('USC00242409', iwr_data_dir, iwr_table, start=start, end=end)
 
-    # location_analysis()
-
-    # openet_get_fields()
 # ========================= EOF ====================================================================

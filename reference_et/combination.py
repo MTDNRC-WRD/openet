@@ -6,8 +6,9 @@
 from .meteo_utils import *
 from .rad_utils import *
 
-from .utils import get_index_shape
+# from .utils import get_index_shape
 
+import pandas as pd
 
 # Specific heat of air [MJ kg-1 °C-1]
 CP = 1.013 * 10 ** -3
@@ -15,6 +16,17 @@ CP = 1.013 * 10 ** -3
 STEFAN_BOLTZMANN_HOUR = 2.042 * 10 ** -10
 # Stefan Boltzmann constant - daily [MJm-2K-4d-1]
 STEFAN_BOLTZMANN_DAY = 4.903 * 10 ** -9
+
+
+def get_index_shape(df):
+    """Method to return the index and shape of the input data.
+
+    """
+    try:
+        index = pd.DatetimeIndex(df.index)
+    except AttributeError:
+        index = pd.DatetimeIndex(df.time)
+    return index, df.shape
 
 
 def penman(tmean, wind, rs=None, rn=None, g=0, tmax=None, tmin=None,

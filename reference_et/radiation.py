@@ -9,7 +9,20 @@ from .combination import calc_lambda
 
 from .meteo_utils import extraterrestrial_r, calc_press, calc_psy, calc_vpc
 
-from .utils import get_index_shape
+# from .utils import get_index_shape
+
+import pandas as pd
+
+
+def get_index_shape(df):
+    """Method to return the index and shape of the input data.
+
+    """
+    try:
+        index = pd.DatetimeIndex(df.index)
+    except AttributeError:
+        index = pd.DatetimeIndex(df.time)
+    return index, df.shape
 
 
 def turc(tmean, rs, rh, k=0.31):

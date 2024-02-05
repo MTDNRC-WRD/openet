@@ -8,10 +8,12 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from shapely.geometry import Point, MultiPolygon
+from pypxlib import Table
+from tqdm import tqdm
 
 from reference_et.combination import pm_fao56, get_rn
 from reference_et.modified_bcriddle import modified_blaney_criddle
-from reference_et.modified_bcriddle import modified_blaney_criddle_1
+from reference_et.modified_bcriddle import modified_blaney_criddle_1_ep
 from reference_et.modified_bcriddle import modified_blaney_criddle_neh_ex
 from reference_et.rad_utils import extraterrestrial_r, calc_rso
 from utils.agrimet import load_stations
@@ -404,30 +406,60 @@ def check_implementation(clim_db_loc, station='USC00242409', data_dir=None,
     # print(bc)
     print()
     print('Using IWR database:')
-    bc1, start1, end1, kc1 = modified_blaney_criddle_1(clim_db_loc, station[-4:],
-                                                       lat_degrees=lat, elev=elev, fullmonth=False)
+    bc1, start1, end1, kc1 = modified_blaney_criddle_1_ep(clim_db_loc, station[-4:], lat_degrees=lat,
+                                                          elev=elev, fullmonth=False, pivot=True)
 
     print('Season: ', start1.date(), ' to ', end1.date())
     if management_factor:
         print('kc = ', bc1['kc'].mean() * management_factor)
-    # print(bc1['u'])
+    print(bc1[['u', 'ep_tb', 'rain']])
     bc_pet1 = bc1['u'].sum()
-    print(bc_pet1)
+    print('u_tot: ', bc_pet1)
+    print('ep_tot (table): ', bc1['ep_tb'].sum())
+    print('cu_total: ', bc1['cu'].sum())
+    print(bc1[['cu_no_co', 'cu', 'co']])
+    # print('ep_tot (equation): ', bc1['ep_eq'].sum())
+
     # print('Should match with first entry under "totals" in IWR: ', bc_pet)
 
-    print()
-    print('Using daily data:')
-    bc, start, end, kc = modified_blaney_criddle(df, lat_degrees=lat, elev=elev,
-                                                 season_start=start1, season_end=end1, mid_month=True)
-    # bc, start, end, kc = modified_blaney_criddle(df, lat_degrees=lat, elev=elev, mid_month=True)
-
-    print('Season: ', start.date(), ' to ', end.date())
-    if management_factor:
-        print('kc = ', bc['kc'].mean() * management_factor)
-    # print(bc['u'])
-    print(bc['u'].sum())
+    # print()
+    # print('Using daily data:')
+    # # bc, start, end, kc = modified_blaney_criddle_ep(df, lat_degrees=lat, elev=elev,
+    # #                                              season_start=start1, season_end=end1, mid_month=True)
+    # bc, start, end, kc = modified_blaney_criddle_ep(df, lat_degrees=lat, elev=elev, mid_month=True)
+    #
+    # print('Season: ', start.date(), ' to ', end.date())
+    # if management_factor:
+    #     print('kc = ', bc['kc'].mean() * management_factor)
+    #
+    # print(bc[['u', 'ep_tb', 'ep_eq']])
+    # print('u_tot: ', bc['u'].sum())
+    # print('ep_tot (table): ', bc['ep_tb'].sum())
+    # print('ep_tot (equation): ', bc['ep_eq'].sum())
 
     pass
+
+
+def check_all_iwr(clim_db_loc, data_dir, out_file):
+    table = Table(clim_db_loc)
+    out = pd.DataFrame(index=range(1, 181), columns=['ST_NUM', 'ST_NAME', 'PIVOT_CU'])
+    for i in tqdm(range(len(table))):
+        station = table[i]['Station No'][2:]
+        _file = os.path.join(data_dir, 'USC0024{}.csv'.format(station))
+        if os.path.isfile(_file):
+            # print(station)
+            df = pd.read_csv(_file)
+            lat = df.iloc[0]['LATITUDE']
+            lon = df.iloc[0]['LONGITUDE']
+            elev = elevation_from_coordinate(lat, lon)
+            bc1, start1, end1, kc1 = modified_blaney_criddle_1_ep(clim_db_loc, station, lat_degrees=lat,
+                                                                  elev=elev, fullmonth=False, pivot=False)
+            out.at[i+1, 'ST_NUM'] = station
+            out.at[i+1, 'ST_NAME'] = table[i]['Station Name']
+            out.at[i+1, 'PIVOT_CU'] = bc1['cu'].sum()
+        else:
+            continue
+    out.to_csv(out_file)
 
 
 def check_implementation_neh_ex(station='USC00242409', data_dir=None, iwr_table=None,
@@ -463,7 +495,7 @@ def check_implementation_neh_ex(station='USC00242409', data_dir=None, iwr_table=
     pass
 
 
-def plot_field_comparison(field_comp_result,data_dir):
+def plot_field_comparison(field_comp_result, data_dir):
     # Loading shapefile for field_comparison results
     gdf = gpd.read_file(field_comp_result)
     print("gdf columns ", gdf.columns)
@@ -598,7 +630,7 @@ if __name__ == '__main__':
     out_summary = 'C:/Users/CND571/Downloads/fields_comparison_01262024.shp'
     # field_comparison(shp_, start_pos, end_pos, etof_, out_summary)  # Takes about 25 minutes to run.
 
-    plot_field_comparison(out_summary, d)
+    # plot_field_comparison(out_summary, d)
 
     iwr_data_dir = os.path.join(d, 'from_ghcn')
     stations = os.path.join(d, 'mt_arm_iwr_stations.csv')
@@ -631,14 +663,20 @@ if __name__ == '__main__':
     # check_implementation(iwr_clim_db_loc, 'USC00241722', iwr_data_dir, start=start, end=end)
     # # Broadwater, Townsend
     # check_implementation(iwr_clim_db_loc, 'USC00248324', iwr_data_dir, start=start, end=end)
-
+    #
     # # IWR stations used in Ketchum 2022 memo:
     # # Park, Livingston (12S, not FAA?)
-    # check_implementation(iwr_clim_db_loc, 'USC00245080', iwr_data_dir, start=start, end=end, management_factor=0.675)
+    # check_implementation(iwr_clim_db_loc, 'USC00245080', iwr_data_dir, start=start, end=end)
     # # Sweet Grass, Big Timber
-    # check_implementation(iwr_clim_db_loc, 'USC00240780', iwr_data_dir, start=start, end=end, management_factor=0.494)
+    # check_implementation(iwr_clim_db_loc, 'USC00240780', iwr_data_dir, start=start, end=end)
 
-    # This line replicates the Denver, CO example from NEH ch 2, appendix A
+    check_implementation(iwr_clim_db_loc, 'USC00241995', iwr_data_dir, start=start, end=end)
+
+    # # This line replicates the Denver, CO example from NEH ch 2, appendix A
     # check_implementation_neh_ex('USC00242409', iwr_data_dir, iwr_table, start=start, end=end)
+
+    # You can run this after fixing the irrigation stuff.
+    iwr_sum = os.path.join(d, 'iwr_cu_flood_est_02052024.csv')
+    # check_all_iwr(iwr_clim_db_loc, iwr_data_dir, iwr_sum)
 
 # ========================= EOF ====================================================================

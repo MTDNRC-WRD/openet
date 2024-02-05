@@ -414,11 +414,11 @@ class GridMet(Thredds):
             self.start = self.date
             self.end = self.date
 
-        if self.start.year < self.end.year:
-            self.single_year = False
+        # if self.start.year < self.end.year:
+        #     self.single_year = False
 
-        if self.start > self.end:
-            raise ValueError('start date is after end date')
+        # if self.start > self.end:
+        #     raise ValueError('start date is after end date')
 
         if not self.bbox and not self.lat:
             raise AttributeError('No bbox or coordinates given')
@@ -523,6 +523,15 @@ class GridMet(Thredds):
         df = DataFrame(data=series, index=time)
         df.columns = [self.variable]
         return df
+
+    def get_point_elevation(self):
+
+        url = self._build_url()
+        url = url + '#fillmismatch'
+        xray = open_dataset(url)
+        subset = xray.sel(lon=self.lon, lat=self.lat, method='nearest')
+        elev = subset.get('elevation').values[0]
+        return elev
 
     def _build_url(self):
 

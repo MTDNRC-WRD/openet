@@ -17,7 +17,7 @@ import sqlite3
 import matplotlib.pyplot as plt
 
 from utils.thredds import GridMet
-from iwr.iwr_approx import iwr_daily
+from iwr.iwr_approx import iwr_daily_fm
 
 CLIMATE_COLS = {
     'etr': {
@@ -448,7 +448,7 @@ def corrected_gridmet_db(gridmet_points, fields_join, gridmet_csv_dir, gridmet_r
 
 # very similar to open_et_get_fields in point_comparison.py
 def openet_get_fields_link(fields, start, end, et_too=False,
-                           api_key='ZBXxCeBRsSgkeLvsROKVTDS1w9UV0xfOKyEJGTNcEEPT15DQsYfbB0uu1K9w'):
+                           api_key='C:/Users/CND571/Documents/OpenET_API.txt'):
     """ Uses OpenET API timeseries multipolygon endpoint to get etof data given a Google Earth Engine asset.
     Prints the url, click link to download csv file; link lasts 5 minutes.
     Switch to export multipolygon? I might be able to automatically retrieve that.
@@ -459,6 +459,9 @@ def openet_get_fields_link(fields, start, end, et_too=False,
     :et_too: if True, also get link for downloading OpenET ensemble ET over same time period and set of fields
     :api_key: from user's OpenET account, Hannah's is default
     """
+
+    key_file = open(api_key, "r")
+    api_key = key_file.readline()
 
     # set your API key before making the request
     header = {"Authorization": api_key}
@@ -604,7 +607,7 @@ def cu_analysis(shp, gridmet, start, end, etof, out):
 
         # Calculating bc seasonal ET
         grd['MM'] = (grd['MN'] + grd['MX']) / 2  # gridmet units are in mm and degrees celsius.
-        bc, start1, end1 = iwr_daily(grd, lat, elev, pivot=pivot)
+        bc, start1, end1 = iwr_daily_fm(grd, lat, elev, pivot=pivot)
 
         bc_cu = mf * bc['cu'].sum()  # add management factor
         bc_pet = bc['u'].sum()
@@ -649,22 +652,23 @@ def cu_analysis(shp, gridmet, start, end, etof, out):
 
 
 def cu_analysis_db(shp, gridmet, start, end, etof, out):
-    # Based on field_comparison in point_comparison.py
-    # suggestion in memo: use gridmet for ET, then OpenET for crop coefficient (etof).
+    """ Takes in database tables for fields ids and gridmet data, calculates average seasonal consumptive use
+    over time period using both IWR/DNRC and OpenET methods, and outputs to a third database file with results."""
 
-    # # Looks for all new fields, not calculated over the given time frame.
-    # fields = pd.read_sql("SELECT DISTINCT fid FROM {}".format(shp), con)
-    # existing_fields = pd.read_sql("SELECT DISTINCT fid, start, end FROM {}".format(out), con)
-    # # If there are any new fields,
-    # if ~existing_fields.isin(fields['fid']).any().any():
-    #     # Remove potential duplicate fields
-    #     fields = fields.loc[~fields['fid'].isin(existing_fields)]
-    #     # and run data cu algorithm
+    # Looks for all new fields, not calculated over the given time frame.
+    fields = pd.read_sql("SELECT DISTINCT * FROM {}".format(shp), con)
+    existing_fields = pd.read_sql("SELECT DISTINCT fid, start, end FROM {}".format(out), con)
+    # If there are any new fields,
+    if ~existing_fields.isin(fields['fid']).any().any():
+        # Remove potential duplicate fields
+        fields = fields.loc[~fields['fid'].isin(existing_fields)]
+        # and run data cu algorithm
 
     # complete analysis for all remaining fields...
     gdf = pd.read_sql("SELECT DISTINCT * FROM {}".format(shp), con)
 
     # loading in OpenET data from files
+    # Change this to sql
     file = pd.read_csv(etof, index_col=['fid', 'time'], date_format="%m/%d/%Y").sort_index()
     # file = pd.read_csv(etof, index_col=['fid', 'time'], date_format="%Y-%m-%d").sort_index()  # This was wrong
 
@@ -683,8 +687,8 @@ def cu_analysis_db(shp, gridmet, start, end, etof, out):
         lon, lat = row['lon'], row['lat']
         elev = row['elev_gm']  # elevation from retrieved gridmet station
         #
-        # grd = pd.read_sql("SELECT date, eto_mm, tmin_c, tmax_c, prcp_mm FROM {} WHERE gfid={} AND "
-        #                   "date(date) BETWEEN date('{}') AND date('{}')".format(gridmet, row['gfid'], start, end), con)
+        # grd = pd.read_sql("SELECT date, eto_mm, tmin_c, tmax_c, prcp_mm FROM {} WHERE gfid={} AND date(date) "
+        #                   "BETWEEN date('{}') AND date('{}')".format(gridmet, row['gfid'], start, end), con)
         grd = pd.read_sql("SELECT date, eto_mm, tmin_c, tmax_c, prcp_mm FROM ? WHERE gfid=? AND "
                           "date(date) BETWEEN date('?') AND date('?')", con, params=(gridmet, row['gfid'], start, end))
         # rename variables needed in blaney_criddle calculations
@@ -693,8 +697,10 @@ def cu_analysis_db(shp, gridmet, start, end, etof, out):
 
         if row['itype'] == 'P':
             pivot = True
+            carryover = 0.5
         else:
             pivot = False
+            carryover = 2.0
 
         mfs = gpd.read_file('C:/Users/CND571/Documents/Data/management_factors/mt_county_management_factors.shp')
 
@@ -706,11 +712,11 @@ def cu_analysis_db(shp, gridmet, start, end, etof, out):
 
         # Calculating bc seasonal ET
         grd['MM'] = (grd['MN'] + grd['MX']) / 2  # gridmet units are in mm and degrees celsius.
-        bc, start1, end1 = iwr_daily(grd, lat, elev, pivot=pivot)
+        bc, start1, end1 = iwr_daily_fm(grd, lat, elev, pivot=pivot)
 
         bc_cu = mf * bc['cu'].sum()  # add management factor
         bc_pet = bc['u'].sum()
-        # eff_precip = bc['ep'].sum()
+        eff_precip = bc['ep'].sum()
 
         # Masking daily gridMET data to growing season
         grd['mday'] = ['{}-{}'.format(x.month, x.day) for x in grd.index]
@@ -736,13 +742,15 @@ def cu_analysis_db(shp, gridmet, start, end, etof, out):
         df = df[df['mask'] == 1]
 
         # calculating consumptive use
-        # average seasonal ET times crop coefficient minus effective precip and carryover (?)
+        # IWR: sum of monthly ET minus effective precip minus carryover, all times management factor
+        # sum(u_month - ep_month - co_month) * mf
+        # OpenET: average seasonal ET times crop coefficient minus effective precip and carryover
+        # (ETo * ETof) - ep - co
 
-        # no multipolygons
         summary.loc[i, 'etos'] = et_by_year.mean()
         summary.loc[i, 'etbc'] = bc_pet
         summary.loc[i, 'etof'] = df['etof'].mean()
-        summary.loc[i, 'opnt_cu'] = et_by_year.mean() * df['etof'].mean()  # - eff_precip - carryover  # ???
+        summary.loc[i, 'opnt_cu'] = et_by_year.mean() * df['etof'].mean() - eff_precip - carryover
         summary.loc[i, 'dnrc_cu'] = bc_cu
 
     summary.to_sql(out, con, if_exists='append', index=False)
@@ -759,10 +767,10 @@ def create_shapefile(name, field_select, variables, geo_source):
 
 if __name__ == '__main__':
     # # need to fetch OpenET data for each county separately (and first...)
-    # blargh = ['019_Daniels', '033_Garfield', '051_Liberty', '061_Mineral', '101_Toole']
+    # small_counties = ['019_Daniels', '033_Garfield', '051_Liberty', '061_Mineral', '101_Toole']
     # start_por = "2016-01-01"  # What is the period of record for OpenET etof?
     # end_por = "2022-12-31"
-    # for i in blargh:
+    # for i in small_counties:
     #     gee_asset = 'projects/ee-hehaugen/assets/{}'.format(i)
     #     openet_get_fields_link(gee_asset, start_por, end_por)
 
@@ -782,8 +790,8 @@ if __name__ == '__main__':
     # cur.execute("CREATE TABLE ?(fid, itype, usage, mapped_by, gfid, lat, lon, elev_gm)", (fields,))
     # cur.execute("CREATE TABLE ?(fid, start, end, etos, etbc, etof, opnt_cu, dnrc_cu)", (results,))
     # These do work.
-    cur.execute("CREATE TABLE {}(date, year, month, day, centroid_lat, centroid_lon, elev_m, "
-                "tmin_c, tmax_c, srad_wm2, prcp_mm, etr_mm, eto_mm, etr_mm_uncorr, eto_mm_uncorr, gfid)".format(gm_ts))
+    cur.execute("CREATE TABLE {}(date, year, month, day, centroid_lat, centroid_lon, elev_m, tmin_c, tmax_c, "
+                "srad_wm2, prcp_mm, etr_mm, eto_mm, etr_mm_uncorr, eto_mm_uncorr, gfid)".format(gm_ts))
     cur.execute("CREATE TABLE {}(fid, itype, usage, mapped_by, county, gfid, lat, lon, elev_gm)".format(fields_db))
     cur.execute("CREATE TABLE {}(fid, start, end, etos, etbc, etof, opnt_cu, dnrc_cu)".format(results))
 
@@ -803,16 +811,17 @@ if __name__ == '__main__':
     pos_start = '2016-01-01'
     pos_end = '2022-12-31'
 
-    # Running analysis for smallest county
+    # Running analysis for 3 smallest counties
     i = 0
-    county_id = county_count.index[i]
-    print("County {}".format(county_id))
-    county_fields = mt_fields[mt_fields['county'] == county_id]
-    # print(county_fields)
-    gridmet_match_db(county_fields, gridmet_cent, fields_db)  # short
-    corrected_gridmet_db(gridmet_cent, fields_db, gm_ts, rasters_)  # very long
-    etof_file = "C:/Users/CND571/Documents/Data/ensemble_monthly_etof_{}.csv".format(county_id)
-    cu_analysis_db(fields_db, gm_ts, pos_start, pos_end, etof_file, results)  # short
+    for i in range(3):
+        county_id = county_count.index[i]
+        print("County {}".format(county_id))
+        county_fields = mt_fields[mt_fields['county'] == county_id]
+        # print(county_fields)
+        gridmet_match_db(county_fields, gridmet_cent, fields_db)  # short
+        corrected_gridmet_db(gridmet_cent, fields_db, gm_ts, rasters_)  # very long
+        etof_file = "C:/Users/CND571/Documents/Data/ensemble_monthly_etof_{}.csv".format(county_id)
+        cu_analysis_db(fields_db, gm_ts, pos_start, pos_end, etof_file, results)  # short
 
     # # # # # # # # # # # # # # # #
 

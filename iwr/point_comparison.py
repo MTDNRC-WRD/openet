@@ -53,15 +53,18 @@ sns.set_style("white", {'axes.linewidth': 0.5})
 
 
 def openet_get_fields(fields, start, end, et_too=False,
-                      api_key='ZBXxCeBRsSgkeLvsROKVTDS1w9UV0xfOKyEJGTNcEEPT15DQsYfbB0uu1K9w'):
+                      api_key='C:/Users/CND571/Documents/OpenET_API.txt'):
     """ Uses OpenET API multipolygon timeseries endpoint to get etof data given a Google Earth Engine asset.
     Prints the url, click link to download csv file; link lasts 5 minutes.
     :fields: path to gee asset, form of 'projects/cloud_project/assets/asset_filename'
     :start: beginning of period of study, 'YYYY-MM-DD' format
     :end: end of period of study, 'YYYY-MM-DD' format
     :et_too: if True, also get link for downloading OpenET ensemble ET over same time period and set of fields
-    :api_key: from user's OpenET account, Hannah's is default
+    :api_key: from user's OpenET account, provide path to txt file.
     """
+
+    key_file = open(api_key, "r")
+    api_key = key_file.readline()
 
     # set your API key before making the request
     header = {"Authorization": api_key}

@@ -1,9 +1,10 @@
 import os
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, date
 from calendar import monthrange
 import pandas as pd
 import numpy as np
 from pypxlib import Table
+import matplotlib.pyplot as plt
 
 # Required for running IWR on daily weather data files.
 from utils.elevation import elevation_from_coordinate
@@ -301,6 +302,199 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
             df['cu'].iloc[i] = 0
             i += 1
 
+    # end of season carryover
+    end_co = carryover
+    i = 1
+    while end_co != 0:
+        if df['cu'].iloc[-i] > end_co:
+            df['cu'].iloc[-i] = df['cu'].iloc[-i] - end_co
+            end_co = 0
+        else:
+            end_co = end_co - df['cu'].iloc[-i]
+            df['cu'].iloc[-i] = 0
+            i += 1
+
+    return df, season_start, season_end
+
+
+def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', season_end='2000-09-30', pivot=True):
+    """
+    Replicates functionality of IWR as used by MT DNRC for HUA analysis with daily time series data.
+    This function can implement the algortihm at any location given the required data
+    Custom implementation of the SCS Blaney Criddle method.
+    Assumes inout data is in Celsius and rain in mm.
+    Includes calculation of effective precip per NEH Ch2, pgs 147-152 (pdf 165-170)
+    Will only do full-month periods, calculations for partial months
+    at the start and end of the growing season have been removed.
+    It is not advised to change the default start and end dates.
+    :param df:
+    :param lat_degrees:
+    :param elev:
+    :param season_start:
+    :param season_end:
+    :param pivot:
+    :return:
+    """
+
+    # NEH 2-233 "...mean temperature is assumed to occur on the 15th day of each month..."
+    # however, this gives results that differ substantially from NRCS IWR database files
+    mid_months = [d for d in df.index if d.day == 15]
+    t = df['MM'].loc[mid_months].resample('M').mean()
+    t = t.groupby(t.index.month).mean() * 9 / 5 + 32
+    # print(t)
+
+    # precipitation data
+    p = df['PP'].resample('M').sum()
+    p = p.groupby(p.index.month).mean() / 25.4  # mm to in
+    annual_p = df['PP'].resample('Y').sum() / 25.4
+
+    dtmm = df['MM'].groupby([df.index.month, df.index.day]).mean() * 9 / 5 + 32
+    yr_ind = pd.date_range('2000-01-01', '2000-12-31', freq='d')
+    dtmm.index = yr_ind
+
+    if not season_start:  # Using daily data
+        season_start = dtmm[dtmm > 50.].index[0]
+        start_month = season_start.month - 1
+
+        # # calculating season start, method for only monthly data. Above method is close.
+        # month = t[t >= 50].index[0]  # get month when temp gets above 50
+        # month_len = monthrange(2000, month - 1)[1]  # get length of preceding month
+        # season_start1 = datetime(year=2000, month=month - 1, day=15)  # get midpoint of preceding month
+        # # calculate number of days past midpoint of preceding month when we reach average temp of 50
+        # days = round(((50. - t[month - 1]) * month_len) / (t[month] - t[month - 1]))
+        # season_start1 = season_start1 + timedelta(days=days)  # add days
+        # print('season_start1: ', season_start1)
+    else:
+        season_start = pd.to_datetime(season_start)
+        start_month = season_start.month - 1
+
+    if not season_end:  # Using monthly interpolation
+        # # the daily method yields a very different result from IWR
+        # dtmn = df['MN'].groupby([df.index.month, df.index.day]).mean() * 9 / 5 + 32
+        # yr_ind = pd.date_range('2000-01-01', '2000-12-31', freq='d')
+        # dtmn.index = yr_ind
+        # season_end = dtmn.loc['2000-07-01':][dtmn < 28.].index[0]
+
+        # try this: (gets pretty close to IWR freeze dates)
+        month = t[t >= 53].index[-1]  # get last month when temp gets above 53
+        month_len = monthrange(2000, month)[1]  # get length of month
+        season_end = datetime(year=2000, month=month, day=15)  # get midpoint of month
+        # calculate number of days past midpoint of month when we reach average temp of 53
+        days = round(((53. - t[month]) * month_len) / (t[month + 1] - t[month]))
+        season_end = season_end + timedelta(days=days)  # add days
+        end_month = season_end.month
+        # print(season_end)
+    else:
+        season_end = pd.to_datetime(season_end)
+        end_month = season_end.month
+
+    season_length = (season_end - season_start).days
+
+    lat = round(lat_degrees)
+    sunshine = lat_to_sunshine[lat]
+
+    dates = pd.date_range(season_start, season_end, freq='MS') + timedelta(days=14)
+    d_accum = (dates - season_start).days
+    pct_season = d_accum/season_length
+    temps = t.loc[dates.month]
+    precips = p.loc[dates.month]
+    # months = (dates1.month - 1).to_list()
+    pct_day_hrs = sunshine[start_month:end_month]
+
+    dates = [pd.to_datetime('2000-{}-{}'.format(d.month, d.day)) for d in dates]
+    df = pd.DataFrame(np.array([d_accum, pct_season, temps, precips, pct_day_hrs]).T,
+                      columns=['accum_day', 'pct_season', 't', 'rain', 'p'],
+                      index=dates)
+    # t = mean monthly air temp
+    # p = monthly percentage of annual daylight hours
+
+    df['f'] = df['t'] * df['p'] / 100.  # monthly consumptive use factor
+
+    df['kt'] = df['t'] * 0.0173 - 0.314
+    df['kt'][df['t'] < 36.] = 0.3
+
+    elevation_corr = 1 + (0.1 * (elev / 1000.))  # from footnote 3 on IWR results page
+
+    kc = pd.Series(alfalfa_kc, index=[d for d in yr_ind if (d.day == 1) or (d.day == 15)])
+    kc = kc.reindex(yr_ind)
+    kc.iloc[0] = 0.6
+    kc.iloc[-1] = 0.6
+    kc = kc.interpolate()
+    df['kc'] = kc.loc[df.index]  # growth stage from table
+    df['k'] = df['kc'] * elevation_corr * df['kt']  # empirical crop coefficient, corrected for air temp.
+    df['ref_u'] = df['kt'] * df['f']  # no crop coefficient or elevation correction.
+    df['u'] = df['k'] * df['f']  # monthly consumptive use, inches, "total monthly ET" in IWR.
+
+    # Effective precipitation calculations
+    # From NEH Ch2 Table 2-43
+    table_ep = effective_ppt_table()
+
+    # Keys are water storage depth in inches.
+    wsd = None
+    if wsd:
+        factors = {0.75: 0.72, 1.0: 0.77, 1.5: 0.86, 2.0: 0.93, 2.5: 0.97, 3.0: 1.00,
+                   4.0: 1.02, 5.0: 1.04, 6.0: 1.06, 7.0: 1.07}
+        key = min(factors.keys(), key=lambda x: abs(x - wsd))
+        factor = factors[key]
+    else:  # assume default wsd of 3 in.
+        factor = 1.0
+
+    # Get monthly ET and precip, rounding for table lookup below
+    et = df['u'].to_list()
+    pm = df['rain']
+
+    # Accounting for irrigation type
+    if pivot:
+        net_irr = 1.0
+    else:
+        net_irr = 4.0
+    carryover = net_irr / 4.0  # start and end value, total seasonal is twice this value.
+
+    # Evenly distributing net irrigation application across growing season
+    pct_ssn_new = df['pct_season']
+    pct_ssn_shift = np.zeros(len(df))
+    pct_ssn_shift[1:] = df['pct_season'].iloc[:-1]
+    pct_ssn_new = pct_ssn_new - pct_ssn_shift
+    monthly_irr = pct_ssn_new * net_irr
+
+    # We now have mean monthly precip. Next get ratio for 80% chance.
+    # avg_ann_ppt = sum(ppt.values)
+    avg_precip = [3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 35, 40, 45, 50, 55, 60, 70, 80, 90]
+    ratios_80 = [0.45, 0.5, 0.54, 0.57, 0.60, 0.62, 0.63, 0.65, 0.69, 0.71, 0.73, 0.74, 0.75, 0.77,
+                 0.78, 0.79, 0.80, 0.81, 0.82, 0.83, 0.84, 0.85, 0.86, 0.87, 0.88, 0.89, 0.90]
+    ratios_table_80 = dict(zip(avg_precip, ratios_80))  # column from NEH table 2-46 (pdf 171)
+    key = min(ratios_table_80.keys(), key=lambda x: abs(x - annual_p.mean()))
+    ratio80 = ratios_table_80[key]
+    pm = (pm + monthly_irr) * ratio80  # Irrigation applied before ratio.
+    # Assumes irrigation volume is affected by dry years?
+
+    # Then round the results to input into table.
+    pmr = (round(pm * 2) / 2)
+
+    ep = []
+    for i in range(len(df)):
+        epi = factor * table_ep[str(int(et[i]))][pmr.iloc[i]]
+        if epi < et[i] and epi < pmr.iloc[i]:
+            ep.append(epi)
+        else:
+            ep.append(min(et[i],pm.iloc[i]))
+    df['ep'] = ep
+
+    # Net irrigation requirements (almost "consumptive use", just needs management factor)
+    df['cu'] = df['u'] - df['ep']
+
+    # Accounting for start and end of season carryover
+    # start of season carryover
+    beg_co = carryover
+    i = 0
+    while beg_co != 0:
+        if df['cu'].iloc[i] > beg_co:
+            df['cu'].iloc[i] = df['cu'].iloc[i] - beg_co
+            beg_co = 0
+        else:
+            beg_co = beg_co - df['cu'].iloc[i]
+            df['cu'].iloc[i] = 0
+            i += 1
     # end of season carryover
     end_co = carryover
     i = 1
@@ -639,7 +833,7 @@ def run_one_iwr_station(station='2409', clim_db_loc=None, data_dir=None,
         df['PP'] = df['PRCP'] / 10.
         df = df[['MX', 'MN', 'PP']]
         df['MM'] = (df['MX'] + df['MN']) / 2
-        bc, start, end = iwr_daily(df, lat_degrees=lat, elev=elev, pivot=pivot)
+        bc, start, end = iwr_daily_fm(df, lat_degrees=lat, elev=elev, pivot=pivot)
         print('Season: ', start.date(), ' to ', end.date())
         print(bc[['u', 'ep', 'cu']])
         print('total ET: ', bc['u'].sum())
@@ -709,6 +903,89 @@ def run_all_iwr_stations(clim_db_loc, out_file, data_dir=None, start='1971-01-01
     out.to_csv(out_file)
 
 
+def plot_growing_season_starts_and_ends(clim_db_loc):
+    table = Table(clim_db_loc)
+
+    # Looking at season end dates
+    end_dates = []
+    doy = []
+    months = []
+    for i in range(len(table)):
+        temp = table[i]['Fall mo/dy 28']
+        date_m = temp[:2]
+        date_d = temp[3:]
+        end_date = date(year=2000, month=int(date_m), day=int(date_d))
+        end_dates.append(end_date)
+        doy.append(end_date.timetuple().tm_yday)
+        months.append(end_date.month)
+
+    # print(min(end_dates))
+    # print(max(end_dates))
+    # print(min(doy))
+    # print(max(doy))
+
+    bins = np.arange(230, 303)
+    labels = pd.date_range(start='2000-08-17', end='2000-10-28').date
+
+    # Looking at season start dates
+    starts = []
+    doys = []
+    monthss = []
+    for i in range(len(table)):
+        row = table[i]
+        t = pd.Series({1: row['T Jan'], 2: row['T Feb'], 3: row['T Mar'], 4: row['T Apr'], 5: row['T May'],
+                       6: row['T Jun'], 7: row['T Jul'], 8: row['T Aug'], 9: row['T Sep'], 10: row['T Oct'],
+                       11: row['T Nov'], 12: row['T Dec']})
+        month = t[t >= 50].index[0]  # get month when temp gets above 50
+        month_len = monthrange(2000, month - 1)[1]  # get length of preceding month
+        season_start = datetime(year=2000, month=month - 1, day=15)  # get midpoint of preceding month
+        # calculate number of days past midpoint of preceding month when we reach average temp of 50
+        days = round(((50. - t[month - 1]) * month_len) / (t[month] - t[month - 1]))
+        season_start = season_start + timedelta(days=days)  # add days
+
+        starts.append(season_start)
+        doys.append(season_start.timetuple().tm_yday)
+        monthss.append(season_start.month)
+
+    # print(min(starts))
+    # print(max(starts))
+    # print(min(doys))
+    # print(max(doys))
+
+    binss = np.arange(107, 171)
+    labelss = pd.date_range(start='2000-04-16', end='2000-6-18').date
+
+    # Plotting
+    plt.figure()
+    plt.subplot(211)
+    plt.title('Starts')
+    plt.hist(doys, bins=binss, align='left', zorder=5)
+    plt.xticks(binss, labelss, rotation='vertical')
+    plt.grid(zorder=0)
+
+    plt.subplot(212)
+    plt.title('Ends')
+    plt.hist(doy, bins=bins, align='left', zorder=5)
+    plt.xticks(bins, labels, rotation='vertical')
+    plt.grid(zorder=0)
+    plt.tight_layout()
+
+    plt.figure()
+    plt.subplot(121)
+    plt.title('Starts')
+    counts1, edges1, bars1 = plt.hist(monthss)
+    plt.bar_label(bars1)
+    plt.xlabel('Month')
+
+    plt.subplot(122)
+    plt.title('Ends')
+    counts, edges, bars = plt.hist(months)
+    plt.bar_label(bars)
+    plt.xlabel('Month')
+
+    plt.show()
+
+
 if __name__ == '__main__':
     d = 'C:/Users/CND571/Documents'
 
@@ -727,8 +1004,10 @@ if __name__ == '__main__':
     # time period to use for daily data, if different one needed
     # pos_start, pos_end = '1971-01-01', '2000-12-31'  # default, period used in IWR
 
-    run_one_iwr_station('1995', data_dir=daily_data_dir)
+    run_one_iwr_station('2409', data_dir=daily_data_dir)
 
     # run_all_iwr_stations(iwr_clim_db_loc, iwr_sum, daily_data_dir)
+
+    plot_growing_season_starts_and_ends(iwr_clim_db_loc)
 
 # ========================= EOF ====================================================================

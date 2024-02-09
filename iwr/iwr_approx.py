@@ -196,7 +196,7 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
     df['kt'][df['t'] < 36.] = 0.3
 
     elev = row['Elevation'] / 3.281  # feet to meters
-    elevation_corr = 1 + (0.1 * np.floor(elev / 1000.))  # from footnote 3 on IWR results page
+    elevation_corr = 1 + (0.1 * (elev / 1000.))  # from footnote 3 on IWR results page
 
     kc = pd.Series(alfalfa_kc, index=[d for d in yr_ind if (d.day == 1) or (d.day == 15)])
     kc = kc.reindex(yr_ind)
@@ -273,7 +273,11 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
 
     ep = []
     for i in range(len(df)):
-        ep.append(factor * table_ep[str(int(et[i]))][pmr.iloc[i]])
+        epi = factor * table_ep[str(int(et[i]))][pmr.iloc[i]]
+        if epi < et[i] and epi < pmr.iloc[i]:
+            ep.append(epi)
+        else:
+            ep.append(min(et[i], pm.iloc[i]))
 
     # Get first and last months back into fractions.
     ep[0] = ep[0] * month_fraction1
@@ -482,7 +486,7 @@ def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=Non
     df['kt'] = df['t'] * 0.0173 - 0.314
     df['kt'][df['t'] < 36.] = 0.3
 
-    elevation_corr = 1 + (0.1 * np.floor(elev / 1000.))  # from footnote 3 on IWR results page
+    elevation_corr = 1 + (0.1 * (elev / 1000.))  # from footnote 3 on IWR results page
 
     kc = pd.Series(alfalfa_kc, index=[d for d in yr_ind if (d.day == 1) or (d.day == 15)])
     kc = kc.reindex(yr_ind)
@@ -559,7 +563,11 @@ def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=Non
 
     ep = []
     for i in range(len(df)):
-        ep.append(factor * table_ep[str(int(et[i]))][pmr.iloc[i]])
+        epi = factor * table_ep[str(int(et[i]))][pmr.iloc[i]]
+        if epi < et[i] and epi < pmr.iloc[i]:
+            ep.append(epi)
+        else:
+            ep.append(min(et[i],pm.iloc[i]))
 
     # Get first and last months back into fractions.
     ep[0] = ep[0] * month_fraction1
@@ -596,6 +604,47 @@ def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=Non
             i += 1
 
     return df, season_start, season_end
+
+
+def run_one_iwr_station(station='2409', clim_db_loc=None, data_dir=None,
+                        start='1970-01-01', end='2000-12-31', pivot=True):
+    """ Runs the IWR algorithm for a single location, and prints out the results.
+    Runs either iwr_db, iwr_daily, or both depending on which file paths are provided as parameters.
+    Start and end dates do not affect iwr_db. """
+    if clim_db_loc:
+        print('Using IWR database:')
+        bc, start1, end1 = iwr_database(clim_db_loc, station, fullmonth=False, pivot=pivot)
+        print('Season: ', start1.date(), ' to ', end1.date())
+        print(bc[['u', 'ep', 'cu']])
+        print('total ET: ', bc['u'].sum())
+        print('total EP: ', bc['ep'].sum())
+        print('total CU: ', bc['cu'].sum())
+        print()
+    if data_dir:
+        print('Using daily met data:')
+        _file = os.path.join(data_dir, 'USC0024{}.csv'.format(station))
+        df = pd.read_csv(_file)
+        dt_index = pd.date_range(start, end)
+        df.index = pd.to_datetime(df['DATE'])
+        df = df.reindex(dt_index)
+
+        lat = df.iloc[0]['LATITUDE']
+        lon = df.iloc[0]['LONGITUDE']
+        elev = elevation_from_coordinate(lat, lon)
+
+        df = df[['TMAX', 'TMIN', 'PRCP']]
+
+        df['MX'] = df['TMAX'] / 10.
+        df['MN'] = df['TMIN'] / 10.
+        df['PP'] = df['PRCP'] / 10.
+        df = df[['MX', 'MN', 'PP']]
+        df['MM'] = (df['MX'] + df['MN']) / 2
+        bc, start, end = iwr_daily(df, lat_degrees=lat, elev=elev, pivot=pivot)
+        print('Season: ', start.date(), ' to ', end.date())
+        print(bc[['u', 'ep', 'cu']])
+        print('total ET: ', bc['u'].sum())
+        print('total EP: ', bc['ep'].sum())
+        print('total CU: ', bc['cu'].sum())
 
 
 def run_all_iwr_stations(clim_db_loc, out_file, data_dir=None, start='1971-01-01', end='2000-12-31'):
@@ -660,47 +709,6 @@ def run_all_iwr_stations(clim_db_loc, out_file, data_dir=None, start='1971-01-01
     out.to_csv(out_file)
 
 
-def run_one_iwr_station(station='2409', clim_db_loc=None, data_dir=None,
-                        start='1970-01-01', end='2000-12-31', pivot=True):
-    """ Runs the IWR algorithm for a single location, and prints out the results.
-    Runs either iwr_db, iwr_daily, or both depending on which file paths are provided as parameters.
-    Start and end dates do not affect iwr_db. """
-    if clim_db_loc:
-        print('Using IWR database:')
-        bc, start1, end1 = iwr_database(clim_db_loc, station, fullmonth=False, pivot=pivot)
-        print('Season: ', start1.date(), ' to ', end1.date())
-        print(bc[['u', 'ep', 'cu']])
-        print('total ET: ', bc['u'].sum())
-        print('total EP: ', bc['ep'].sum())
-        print('total CU: ', bc['cu'].sum())
-        print()
-    if data_dir:
-        print('Using daily met data:')
-        _file = os.path.join(data_dir, 'USC0024{}.csv'.format(station))
-        df = pd.read_csv(_file)
-        dt_index = pd.date_range(start, end)
-        df.index = pd.to_datetime(df['DATE'])
-        df = df.reindex(dt_index)
-
-        lat = df.iloc[0]['LATITUDE']
-        lon = df.iloc[0]['LONGITUDE']
-        elev = elevation_from_coordinate(lat, lon)
-
-        df = df[['TMAX', 'TMIN', 'PRCP']]
-
-        df['MX'] = df['TMAX'] / 10.
-        df['MN'] = df['TMIN'] / 10.
-        df['PP'] = df['PRCP'] / 10.
-        df = df[['MX', 'MN', 'PP']]
-        df['MM'] = (df['MX'] + df['MN']) / 2
-        bc, start, end = iwr_daily(df, lat_degrees=lat, elev=elev, pivot=pivot)
-        print('Season: ', start.date(), ' to ', end.date())
-        print(bc[['u', 'ep', 'cu']])
-        print('total ET: ', bc['u'].sum())
-        print('total EP: ', bc['ep'].sum())
-        print('total CU: ', bc['cu'].sum())
-
-
 if __name__ == '__main__':
     d = 'C:/Users/CND571/Documents'
 
@@ -710,7 +718,7 @@ if __name__ == '__main__':
     # run_one_iwr_station('1995', clim_db_loc=iwr_clim_db_loc)
 
     # File path for output generated by 'check_all_iwr'
-    iwr_sum = os.path.join(d, 'iwr_cu_est_all_02052024_1.csv')
+    iwr_sum = os.path.join(d, 'iwr_cu_est_all_02062024.csv')
     # run_all_iwr_stations(iwr_clim_db_loc, iwr_sum)
 
     # Directory of daily historical weather data for use in 'iwr_daily'
@@ -719,7 +727,7 @@ if __name__ == '__main__':
     # time period to use for daily data, if different one needed
     # pos_start, pos_end = '1971-01-01', '2000-12-31'  # default, period used in IWR
 
-    # run_one_iwr_station('1995', data_dir=daily_data_dir)
+    run_one_iwr_station('1995', data_dir=daily_data_dir)
 
     # run_all_iwr_stations(iwr_clim_db_loc, iwr_sum, daily_data_dir)
 

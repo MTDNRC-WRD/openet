@@ -28,6 +28,7 @@ alfalfa_kc = [0.63, 0.73, 0.86, 0.99, 1.08, 1.13, 1.11, 1.06, 0.99, 0.91, 0.78, 
 alfalfa_kc_1 = [0.6, 0.63, 0.68, 0.73, 0.79, 0.86, 0.92, 0.98, 1.04, 1.08, 1.12, 1.13,
                 1.12, 1.11, 1.09, 1.06, 1.03, 0.99, 0.95, 0.91, 0.85, 0.78, 0.72, 0.64]
 
+
 def get_iwr_db_temp(station):
     """ Returns the monthly mean temperatures from the IWR database as a pandas series given the last 4 digits of an IWR weather station
     as a string """

@@ -17,7 +17,6 @@ url = r'https://epqs.nationalmap.gov/v1/json?'
 #     result = requests.get((url + urllib.parse.urlencode(params)))
 #     elev = float(result.json()['value'])
 #     return elev
-#
 
 
 def elevation_from_coordinate(lat, lon):

@@ -6,6 +6,7 @@ from tempfile import mkdtemp
 from datetime import datetime
 from urllib.parse import urlunparse
 
+import pandas as pd
 from numpy import empty, float32, datetime64, timedelta64, argmin, abs, array
 from rasterio import open as rasopen
 from rasterio.crs import CRS
@@ -533,6 +534,52 @@ class GridMet(Thredds):
         elev = subset.get('elevation').values[0]
         return elev
 
+    def subset_nc_pt(self, out_filename=None, return_array=False):
+
+        url = self._build_url_ncss()
+        url = url + '#fillmismatch'
+        df = pd.read_csv(url)
+        # xray = open_dataset(url)
+
+        # subset = xray.sel(lon=self.lon, lat=self.lat, method='nearest')
+        # subset = subset.loc[dict(day=slice(self.start, self.end))]
+        # subset = subset.rename({'day': 'time'})
+        # date_ind = self._date_index()
+        # subset['time'] = date_ind
+        # time = subset['time'].values
+        # series = subset[self.kwords[self.variable]].values
+        # df = DataFrame(data=series, index=time)
+        # df.columns = [self.variable]
+
+        return df
+
+    def _build_url_ncss(self):
+        # time vs temporal as variable keywords?
+        # ParseResult('scheme', 'netloc', 'path', 'params', 'query', 'fragment')
+        if self.variable == 'elev':
+            url = urlunparse([self.scheme, self.service,
+                              '/thredds/ncss/grid/MET/{}/metdata_elevationdata.nc?var={}&latitude={}&longitude={}'
+                              '&temporal=all&&&accept=csv'.format(self.variable, self.kwords[self.variable],
+                                                                  self.lat, self.lon),
+                              '', '', ''])
+        else:
+            url = urlunparse([self.scheme, self.service,
+                              '/thredds/ncss/grid/agg_met_{}_1979_CurrentYear_CONUS.nc?var={}&latitude={}&longitude={}'
+                              '&temporal=all&&&accept=csv'.format(self.variable, self.kwords[self.variable],
+                                                                  self.lat, self.lon),
+                              '', '', ''])
+
+        # if self.variable == 'elev':
+        #     url = urlunparse([self.scheme, self.service,
+        #                       '/thredds/ncss/grid/MET/{}/metdata_elevationdata.nc?var=daily_mean_reference_evapotranspiration_alfalfa&latitude={}&longitude={}&temporal=all&&&accept=csv'.format(self.variable, self.lat, self.lon),
+        #                       '', '', ''])
+        # else:
+        #     url = urlunparse([self.scheme, self.service,
+        #                       '/thredds/ncss/grid/agg_met_{}_1979_CurrentYear_CONUS.nc?var=daily_mean_reference_evapotranspiration_alfalfa&latitude={}&longitude={}&temporal=all&&&accept=csv'.format(self.variable, self.lat, self.lon),
+        #                       '', '', ''])
+
+        return url
+
     def _build_url(self):
 
         # ParseResult('scheme', 'netloc', 'path', 'params', 'query', 'fragment')
@@ -550,9 +597,11 @@ class GridMet(Thredds):
     def write_netcdf(self, outputroot):
         url = self._build_url()
         xray = open_dataset(url)
+        # subset = xray.sel(lon=self.lon, lat=self.lat, method='nearest')  # why did this one fix it?
         if self.variable != 'elev':
+            # subset = subset.loc[dict(day=slice(self.start, self.end))]
             subset = xray.loc[dict(day=slice(self.start, self.end))]
-            subset.rename({'day': 'time'}, inplace=True)
+            subset.rename({'day': 'time'})  # , inplace=True)
         else:
             subset = xray
         subset.to_netcdf(path=outputroot, engine='netcdf4')

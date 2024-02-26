@@ -26,6 +26,7 @@ alfalfa_kc = [0.6, 0.63, 0.68, 0.73, 0.79, 0.86, 0.92, 0.98, 1.04, 1.08, 1.12, 1
 
 
 def effective_ppt_table():
+    """Load effective precip table from file."""
     # NEH 2-148, table 2-43
     d = 'C:/Users/CND571/Documents/Data'
     _file = os.path.join(d, 'eff_precip_neh_chap2.csv')
@@ -34,16 +35,18 @@ def effective_ppt_table():
 
 def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
     """
-    Replicates functionality of IWR as used by MT DNRC for HUA analysis, using IWR databases.
+    Replicate functionality of IWR as used by MT DNRC for HUA analysis using IWR databases.
+
     Only works for stations listed in Table 1 in Rule 36.12.1902
     Custom implementation of the SCS Blaney Criddle method.
-    Updated to not rely on information outside IWR climate db
-    IWR climate db is already in Fahrenheit.
+    Does not rely on information outside climate database included in IWR
+    Climate db is already in Fahrenheit.
     Calculates effective precip assuming a dry year/80% chance.
-    :param station: last 4 digits of station number
+
+    :param station: str, last 4 digits of station number
     :param clim_db_loc: path to IWR climate database
-    :param fullmonth: set growing season to a predefined period of full months (for testing purposes)
-    :param pivot: boolean for irrigation type: either pivot (True) or other (False)
+    :param fullmonth: optional, bool, set growing season to a predefined period of full months (for testing purposes)
+    :param pivot: optional, bool describing irrigation type: either pivot (True) or other (False)
     :return: dataframe with intermediate calculations, and the dates of the growing season.
     Last 3 columns of dataframe are first 3 columns of IWR program output. Sum columns to get totals.
     """
@@ -320,20 +323,24 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
 def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', season_end='2000-09-30', pivot=True):
     """
     Replicates functionality of IWR as used by MT DNRC for HUA analysis with daily time series data.
-    This function can implement the algortihm at any location given the required data
+
+    Location not restricted to IWR stations, given required data.
     Custom implementation of the SCS Blaney Criddle method.
     Assumes inout data is in Celsius and rain in mm.
     Includes calculation of effective precip per NEH Ch2, pgs 147-152 (pdf 165-170)
     Will only do full-month periods, calculations for partial months
     at the start and end of the growing season have been removed.
     It is not advised to change the default start and end dates.
-    :param df:
-    :param lat_degrees:
-    :param elev:
-    :param season_start:
-    :param season_end:
-    :param pivot:
-    :return:
+
+    :param df: pandas DataFrame with meteorological time series data: average daily temperature (Celsius)
+    and daily precipitation (mm)
+    :param lat_degrees: number, latitude of location
+    :param elev: number, elevation of location
+    :param season_start: optional, str, should be first of month
+    :param season_end: optional, str, should be last of month
+    :param pivot: optional, bool describing irrigation type: either pivot (True) or other (False)
+    :return: dataframe with intermediate calculations, and the dates of the growing season.
+    Last 3 columns of dataframe are first 3 columns of IWR program output. Sum columns to get totals.
     """
 
     # NEH 2-233 "...mean temperature is assumed to occur on the 15th day of each month..."

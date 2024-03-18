@@ -5,10 +5,8 @@ import os
 import pandas as pd
 import geopandas as gpd
 import numpy as np
-import pygridmet
 import requests
 import pyproj
-from copy import deepcopy
 from rasterstats import zonal_stats
 from tqdm import tqdm
 import sqlite3
@@ -177,7 +175,6 @@ def openet_get_fields_link(fields, start, end, et_too=False,
 def openet_get_fields_export(fields, start, end, et_too=False,
                              api_key='C:/Users/CND571/Documents/OpenET_API.txt'):
     """ Uses OpenET API timeseries multipolygon endpoint to get etof data given a Google Earth Engine asset.
-    Prints the url, click link to download csv file; link lasts 5 minutes.
     Switch to export multipolygon? I might be able to automatically retrieve that.
     :fields: path to gee asset, form of 'projects/cloud_project/assets/asset_filename'
     :start: beginning of period of study, 'YYYY-MM-DD' format
@@ -198,26 +195,27 @@ def openet_get_fields_export(fields, start, end, et_too=False,
     # set your API key before making the request
     header = {"Authorization": api_key}
 
-    # # temporarily upload a GeoJSON file to use instead of a gee link
-    # # limitations: RFC 7946 formatted (?), max 5mb, expires after 15 seconds.
-    # # Yellowstone will be too big for this. (6.35mb, 3600 fields) How many fields can fit?
-    # args = {
-    #     'file': (fields, open(fields, 'rb'), 'application/geo+json')
-    # }
-    #
-    # # query the api
-    # resp = requests.get(
-    #     headers=header,
-    #     files=args,
-    #     url="https://openet-api.org/account/upload"
-    # )
-    # print(resp)  # Currently giving a 400 Bad Request error.
-    # # Why is this a bad request? It is exactly the format provided in the documentation...
-    # print(resp.json())  # How to call asset_id from this?
-    # response = resp.json()
-    # temp_id = response['asset_id']
-    # print(temp_id)
-    # print()
+    # temporarily upload a GeoJSON file to use instead of a gee link
+    # limitations: RFC 7946 formatted (?), max 5mb, expires after 15 seconds.
+    # Yellowstone will be too big for this. (6.35mb, 3600 fields) How many fields can fit?
+    print(fields)
+    args = {
+        'file': (fields, open(fields, 'rb'), 'application/geo+json')
+    }
+
+    # query the api
+    resp = requests.get(
+        headers=header,
+        files=args,
+        url="https://openet-api.org/account/upload"
+    )
+    print(resp)  # Currently giving a 400 Bad Request error.
+    # Why is this a bad request? It is exactly the format provided in the documentation...
+    print(resp.json())  # How to call asset_id from this?
+    response = resp.json()
+    temp_id = response['asset_id']
+    print(temp_id)
+    print()
 
     # endpoint arguments
     args = {
@@ -226,7 +224,7 @@ def openet_get_fields_export(fields, start, end, et_too=False,
             end
         ],
         "interval": "monthly",
-        "asset_id": fields,
+        "asset_id": temp_id,
         "attributes": [
             "fid"
         ],
@@ -258,6 +256,23 @@ def openet_get_fields_export(fields, start, end, et_too=False,
             url="https://openet-api.org/raster/export/multipolygon"
         )
         print(resp.json())
+
+
+def openet_account_storage(api_key='C:/Users/CND571/Documents/OpenET_API.txt'):
+
+    with open(api_key, 'r') as f:
+        api_key = f.readline()
+
+    # set your API key before making the request
+    header = {"Authorization": api_key}
+
+    # query the api
+    resp = requests.get(
+        headers=header,
+        url="https://openet-api.org/account/storage"
+    )
+
+    print(resp.json())
 
 
 def update_etof_db(con, etof_dir, etof_tb):
@@ -333,12 +348,13 @@ def gridmet_match_db(con, fields, gridmet_points, fields_join):
 
     existing_fields = pd.read_sql("SELECT DISTINCT fid FROM {}".format(fields_join), con)
     # If there are any new fields,
-    if ~existing_fields['fid'].isin(fields['fid']).any().any():
+    if ~existing_fields['fid'].isin(fields['FID']).any().any():
         # Remove potential duplicate fields
-        fields = fields.loc[~fields['fid'].isin(existing_fields['fid'])]
+        fields = fields.loc[~fields['FID'].isin(existing_fields['fid'])]
         fields['gfid'] = np.nan
         # and run matching algorithm
-        for i, field in tqdm(fields.iterrows(), total=fields.shape[0]):
+        # for i, field in tqdm(fields.iterrows(), total=fields.shape[0]):
+        for i, field in fields.iterrows():
             xx, yy = field['geometry'].centroid.x, field['geometry'].centroid.y
             lat, lon = convert_to_wgs84(xx, yy)
             fields.at[i, 'lat'] = lat
@@ -353,7 +369,9 @@ def gridmet_match_db(con, fields, gridmet_points, fields_join):
             elev = g.get_point_elevation()
             fields.at[i, 'elev_gm'] = elev
         # Do not store geometry in db
-        fields = fields.drop(labels='geometry', axis='columns')
+        # fields = fields.drop(labels='geometry', axis='columns')
+        fields = fields.drop(labels=['geometry', 'SOURCECODE', 'COUNTY_NO', 'COUNTYNAME'], axis='columns')
+        fields = fields.rename(columns={'MAPPEDBY': 'mapped_by'})
         # Save new entries to db
         fields.to_sql(fields_join, con, if_exists='append', index=False)
         print('Found {} gridmet target points for {} new fields'.format(len(fields['gfid'].unique()), fields.shape[0]))
@@ -406,7 +424,7 @@ def corrected_gridmet_db(con, gridmet_points, fields_join, gridmet_tb, gridmet_r
 
     #  determining what data is missing
     target_gfids = []
-    for idx in fields['gfid']:
+    for idx in fields['gfid'].unique():  # makes sure repeated gfids in selection don't create redundant records.
         if ~existing_fields['gfid'].isin([idx]).any():
             target_gfids.append([idx, start, end])
         else:
@@ -427,6 +445,8 @@ def corrected_gridmet_db(con, gridmet_points, fields_join, gridmet_tb, gridmet_r
 
     # Makes up to 2 entries for each gridmet point, if requested time range is longer than existing data record
     target_gfids = pd.DataFrame(target_gfids, columns=['gfid', 'start', 'end'])
+
+    # print(target_gfids)
 
     # If there is any new data to fetch,
     if not target_gfids.empty:
@@ -887,9 +907,11 @@ def create_shapefile(name, field_select, variables, geo_source):
 
 if __name__ == '__main__':
     # sqlite database connection
-    conec = sqlite3.connect("C:/Users/CND571/Documents/Data/tutorial_gm.db")
+    # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/tutorial_gm.db")
     # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/opnt_analysis_02232024.db")  # has additional met data
     # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/opnt_analysis_02132024.db")  # has 6 counties
+    # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/opnt_analysis_03042024.db")  # has all counties gm match
+    conec = sqlite3.connect("F:/opnt_analysis_03042024.db")  # has all counties gm match
 
     # sqlite database table names
     gm_ts, fields_db, results, etof_db = 'gridmet_ts', 'field_data', 'field_cu_results', 'opnt_etof'
@@ -911,9 +933,12 @@ if __name__ == '__main__':
     # # asset = '091_sheridan.geojson'
     # asset = 'C:/Users/CND571/PycharmProjects/openet/prep/091_sheridan.geojson'
     # gee_asset = 'projects/ee-hehaugen/assets/091_Sheridan'
+    # # gee_asset = 'projects/ee-hehaugen/assets/037_Golden_Valley'
     # start_por = "2016-01-01"  # What is the period of record for OpenET etof?
     # end_por = "2022-12-31"
-    # openet_get_fields_export(gee_asset, start_por, end_por)
+    # openet_get_fields_export(asset, start_por, end_por)
+
+    # account_storage()
 
     # # need to fetch OpenET data for each county separately (and first...)
     # small_counties = ['019_Daniels', '033_Garfield', '051_Liberty', '061_Mineral', '101_Toole']
@@ -928,42 +953,57 @@ if __name__ == '__main__':
     # etof_loc = "C:/Users/CND571/Documents/Data/etof_files"
     # update_etof_db(conec, etof_loc, etof_db)
 
-    # # gridmet information
-    # gm_d = 'C:/Users/CND571/Documents/Data/gridmet'  # location of general gridmet files
-    # gridmet_cent = os.path.join(gm_d, 'gridmet_centroids_MT.shp')
-    # rasters_ = os.path.join(gm_d, 'correction_surfaces_aea')  # correction surfaces, one for each month and variable.
-    # # Management factor and effective precip table files are called in functions.
-    #
-    # # Loading in state irrigation dataset (43k fields, takes a few seconds to load)
-    # mt_fields = gpd.read_file("C:/Users/CND571/Documents/Data/sid_30JAN2024_all.shp")
-    # mt_fields['county'] = mt_fields['fid'].str.slice(0, 3)
-    # county_count = mt_fields['county'].value_counts(ascending=True)
-    # # print(county_count[:10])
-    #
+    # gridmet information
+    gm_d = 'C:/Users/CND571/Documents/Data/gridmet'  # location of general gridmet files
+    gridmet_cent = os.path.join(gm_d, 'gridmet_centroids_MT.shp')
+    rasters_ = os.path.join(gm_d, 'correction_surfaces_aea')  # correction surfaces, one for each month and variable.
+    # Management factor and effective precip table files are called in functions.
+
+    # # Loading in state irrigation dataset (takes a few seconds to load)
+    # # mt_fields = gpd.read_file("C:/Users/CND571/Documents/Data/sid_30JAN2024_all.shp")  # 43k fields
+    # mt_fields = gpd.read_file("C:/Users/CND571/Documents/Data/statewide_irrigation_dataset_15FEB2024/"
+    #                           "statewide_irrigation_dataset_15FEB2024_5071.shp")  # 52k fields
+    # mt_fields['county'] = mt_fields['FID'].str.slice(0, 3)  # old has lowercase
+    # # county_count = mt_fields['county'].value_counts(ascending=True)  # Start with counties with fewest fields.
+    # county_count = mt_fields['county'].value_counts()  # Start with counties with most fields.
+    # print(county_count)
+
     # pos_start = '2016-01-01'
     # pos_end = '2022-12-31'
-    #
-    # # Running analysis for 6 smallest counties
-    # # This will only update with new information. Each step checks for prior inclusion in db.
-    # # i = 0
-    # # for i in range(5):  # maybe this is better, not doing
-    #
-    # # counties = pd.read_sql("SELECT DISTINCT county FROM {}".format(fields_db), conec)
-    #
-    # for i in tqdm(range(5), total=5):
+
+    # Running analysis for 6 smallest counties
+    # This will only update with new information. Each step checks for prior inclusion in db.
+    # i = 0
+    # for i in range(5):  # maybe this is better, not doing
+
+    # counties = pd.read_sql("SELECT DISTINCT county FROM {}".format(fields_db), conec)
+
+    # for i in tqdm(range(len(county_count)), total=len(county_count)):
     #     county_id = county_count.index[i]
-    #     print()
+    #     # print()
     #     print("{} County ({})".format(COUNTIES[county_id], county_id))
     #     county_fields = mt_fields[mt_fields['county'] == county_id]
     #     # print(county_fields)
-    #     gridmet_match_db(conec, county_fields, gridmet_cent, fields_db)  # short
+    #     gridmet_match_db(conec, county_fields, gridmet_cent, fields_db)  # short-ish, complete after 7? hours running
     #     corrected_gridmet_db(conec, gridmet_cent, fields_db, gm_ts, rasters_, pos_start, pos_end)  # very long
-    #     cu_analysis_db(conec, fields_db, gm_ts, pos_start, pos_end, etof_db, results)  # short
+    #     # cu_analysis_db(conec, fields_db, gm_ts, pos_start, pos_end, etof_db, results)  # short
     #     # county_gfids = pd.read_sql("SELECT DISTINCT gfid FROM {} WHERE county='{}'".format(fields_db, county_id), conec)
     #     # more_gridmet_vars(conec, ['u10_ms'], gridmet_cent, fields_db, gm_ts, rasters_,
     #     #                   pos_start, pos_end, selection=county_gfids)  # very long, should always use selection
     #     # more_gridmet_vars(conec, ['q_kgkg', 'u10_ms', 'srad_wm2'], gridmet_cent, fields_db, gm_ts, rasters_,
     #     #                   pos_start, pos_end, selection=county_gfids)  # very long, should always use selection
+
+    # # Testing speed of calling 5 gridmet points. roughly 30 seconds per gridmet point.
+    # pos_start = '1987-01-01'
+    # pos_end = '2023-12-31'  # Inclusive endpoint
+    # gridmets = pd.read_sql("SELECT DISTINCT gfid FROM {}".format(fields_db), conec)
+    # five_fields = gridmets[:160]
+    # # print(five_fields)
+    # corrected_gridmet_db(conec, gridmet_cent, fields_db, gm_ts, rasters_, pos_start, pos_end, five_fields)
+
+    # gridmets = pd.read_sql("SELECT DISTINCT gfid FROM {}".format(fields_db), conec)
+    # print()
+    # print('Total gridmet points: {}'.format(len(gridmets)))
 
     # plot_results(conec)  # Only dependent on db tables existing
 

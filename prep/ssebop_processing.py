@@ -1,14 +1,14 @@
 
 import ee
 import os
-import sqlite3
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import geopandas as gpd
+import numpy as np
 import datetime as dt
 
 from from_swim_rs.etf_export import clustered_field_etf
-from from_swim_rs.etf_export import clustered_field_etf_1
 from from_swim_rs.landsat_sensing import landsat_time_series_multipolygon
 
 
@@ -36,6 +36,64 @@ def is_authorized():
     return None
 
 
+def etof_quality_plots(county_select):
+    for cnty in county_select:
+        area = gpd.read_file('C:/Users/CND571/Documents/Data/statewide_irrigation_dataset_15FEB2024/{}.shp'
+                             .format(cnty))
+        area = area.to_crs("EPSG:5071")
+        area.index = area['FID']
+        area = area.drop(['FID'], axis=1)
+        area['area_m2'] = area['geometry'].area
+
+        ts = pd.DataFrame(index=area.index)
+        for year in range(1987, 2024):
+            data = pd.read_csv('C:/Users/CND571/Documents/Data/ssebop/{}/etf_{}_irr_ct.csv'
+                               .format(cnty, year), index_col='FID')
+            data = data * 900.0  # to account for 30x30m pixel size
+
+            for i in data.columns:
+                for j in data.index:
+                    data.at[j, i] = data.at[j, i] / area['area_m2'][j]
+
+            data = data.replace(0, np.nan)
+
+            ts[year] = data.mean(axis=1)
+
+            # if year == 2012:
+            #     plt.figure()
+            #     for i in data.index:
+            #         plt.plot(data.loc[i], label=i)
+            #     plt.grid()
+            #
+            #     bins = np.linspace(-0.05, 1.05, 12)
+            #     plt.figure()
+            #     plt.hist(ts[year], bins=bins)
+
+        plt.figure()
+        plt.title('{} County ({}) Average yearly field coverage'.format(COUNTIES[cnty], cnty))
+        plt.plot(ts.mean(), label='percent coverage')  # Total
+        plt.plot(ts.count()/len(ts), label='percent of fields included')
+        # for i in area.index:
+        #     plt.plot(ts.loc[i], label=i)  # By field
+        plt.legend()
+        plt.ylim(0, 1)
+        plt.grid()
+
+        # plt.figure()
+        # plt.title('{} County ({}) average field coverage and std dev ({}/{} fields)'
+        #           .format(COUNTIES[cnty], cnty, ts.mean(axis=1).count(), len(ts)))
+        # plt.axis('off')
+        # plt.subplot(121)
+        # bins = np.linspace(-0.05, 1.05, 12)
+        # plt.hist(ts.mean(axis=1), bins=bins)
+        # plt.xlabel('field coverage')
+        # plt.subplot(122)
+        # plt.hist(ts.std(axis=1))
+        # plt.xlabel('std dev')
+
+    plt.show()
+
+
 if __name__ == '__main__':
 
     # PART ZERO: SETUP
@@ -43,11 +101,13 @@ if __name__ == '__main__':
     if not os.path.exists(d):
         d = 'C:/Users/CND571/Documents/Data'
 
-    # county = '077'  # too big? >600 fields
-    county = '019'  # 37 fields? # files made for this one. Is that affecting the test?
-    # county = '075'  # 219 fields  # lots of files are still failing...
-    # county = '051'  # just one missing here...
-    # county = '033'  # next smallest
+    # Counties already ran through part one:
+    # county = '019'  # 37 fields, the smallest
+    # county = '033'  # next smallest, 56 fields, good.
+    # county = '041'  # 107 fields, good.
+    # county = '055'  # 211 fields, good.
+    # county = '023'  # 307 fields, good.
+    county = '021'  # 402 fields
 
     # PART ONE: GOOGLE EARTH ENGINE DATA TO BUCKET
     # Check earth engine authorization before starting ee stuff.
@@ -60,15 +120,19 @@ if __name__ == '__main__':
     fields = 'projects/ee-hehaugen/assets/SID_15FEB2024/{}'.format(county)
 
     mask = 'irr'
-    chk = os.path.join(d, 'ssebop', county)
-    # clustered_field_etf(fields, bucket_, debug=False, mask_type=mask, check_dir=chk, county=county)
-    clustered_field_etf_1(fields, bucket_, mask_type=mask, county=county)
+    chk = os.path.join(d, 'ssebop', county)  # local path to check for finished output files
+    clustered_field_etf(fields, bucket_, debug=False, mask_type=mask, county=county)  # includes pixel count.
 
-    # now, go download those files using below command in anaconda prompt
+    # next, go download those files using below command in anaconda prompt
     # They take a while to show up. Maybe that's why eedl is preferred.
     # Can use command 'earthengine task list' to check in on progress (also in anaconda prompt)
-    print('gcloud storage cp gs://wudr/MT_CU_2024/{}/*.csv C:/Users/CND571/Documents/Data/ssebop/{}'
+    print('gcloud storage cp gs://mt_cu_2024/MT_CU_2024/{}/*.csv C:/Users/CND571/Documents/Data/ssebop/{}'
           .format(county, county))
+
+    # # PART 1.5: LOOK AT DATA QUALITY
+    # counties = ['019', '033', '041', '055', '023']
+    # # counties = ['033']
+    # etof_quality_plots(counties)
 
     # # PART TWO: FIX TIME SERIES DATA
     # # dtype = 'extracts'
@@ -76,7 +140,7 @@ if __name__ == '__main__':
     # project_ws = os.path.join(d, 'ssebop')
     # tables = os.path.join(project_ws, 'landsat')
     #
-    # yrs = [x for x in range(2000, 2021)]
+    # yrs = [x for x in range(1987, 2024)]
     # # shp = os.path.join(project_ws, 'gis', '{}_fields.shp'.format(project))
     # shp = 'C:/Users/CND571/Documents/Data/statewide_irrigation_dataset_15FEB2024/{}.shp'.format(county)
     #
@@ -90,7 +154,7 @@ if __name__ == '__main__':
     #
     # # landsat_time_series_multipolygon(shp, ee_data, yrs, src, src_ct)
     #
-    # # Plotting detour!
+    # # Plotting detour
     #
     # # Load files
     # data = pd.read_csv(src, index_col='Unnamed: 0', date_format='%Y-%m-%d')

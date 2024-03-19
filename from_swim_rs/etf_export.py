@@ -179,7 +179,7 @@ def flux_tower_etf(shapefile, bucket=None, debug=False, mask_type='irr', check_d
             print(desc)
 
 
-# This is the one that I want to be using.
+# This is the one that I want to be using, have added pixel count as output
 def clustered_field_etf(feature_coll, bucket=None, debug=False, mask_type='irr', check_dir=None, county=None):
     """ Create CSV files from Google Earth Engine data.
     This is timing out about 50% of the time with a county with 600 fields... :(
@@ -192,6 +192,14 @@ def clustered_field_etf(feature_coll, bucket=None, debug=False, mask_type='irr',
     """
 
     feature_coll = ee.FeatureCollection(feature_coll)
+
+    # # Controlling size of feature collection. How to? What should the limit be?
+    # if feature_coll.size() > splits:
+    #     # darn, a recursive function won't work.
+    #     print()
+    #     # cluster? - No.  limit? - probably not. classify? - No. filter?
+    # else:
+    #     print()
 
     s, e = '1987-01-01', '2023-12-31'
     irr_coll = ee.ImageCollection(IRR)
@@ -254,94 +262,10 @@ def clustered_field_etf(feature_coll, bucket=None, debug=False, mask_type='irr',
                 data = etf_img.sample(point, 30).getInfo()
                 print(data['features'])
 
-        # TODO extract pixel count to filter data
         data = bands.reduceRegions(collection=feature_coll,
                                    reducer=ee.Reducer.mean(),
                                    scale=30)
 
-        if county:
-            task = ee.batch.Export.table.toCloudStorage(
-                data,
-                description=desc,
-                bucket=bucket,
-                fileNamePrefix='MT_CU_2024/{}/{}'.format(county, desc),
-                fileFormat='CSV',
-                selectors=selectors)
-        else:
-            task = ee.batch.Export.table.toCloudStorage(
-                data,
-                description=desc,
-                bucket=bucket,
-                fileNamePrefix='MT_CU_2024/{}'.format(desc),
-                fileFormat='CSV',
-                selectors=selectors)
-
-        task.start()
-        print(desc)
-
-
-# This should cut down on processing time? - many are still failing 3/7/24
-def clustered_field_etf_1(feature_coll, bucket=None, mask_type='irr', check_dir=None, county=None):
-    """ Create CSV files from Google Earth Engine data.
-    This should work!
-    I'm still trying to update the pixel count stuff though, to get it as a percent of coverage.
-    This is timing out about 50% of the time with a county with 200 fields... :(
-
-    feature_coll: gee asset ID for field boundaries
-    bucket: name of Google cloud storage bucket to store csv files in.
-    debug: ?
-    mask_type: ?
-    check_dir: ?
-    """
-
-    feature_coll = ee.FeatureCollection(feature_coll)
-
-    s, e = '1987-01-01', '2023-12-31'
-    irr_coll = ee.ImageCollection(IRR)
-    coll = irr_coll.filterDate(s, e).select('classification')
-    remap = coll.map(lambda img: img.lt(1))
-    irr_min_yr_mask = remap.sum().gte(5)  # Only look at fields that have been irrigated for at least 5 years over por?
-
-    # for year in range(1987, 2024):
-    for year in range(1987, 2024):  # for loop, bad? Scaling tutorial said it's fine if it's to send to export function
-
-        irr = irr_coll.filterDate('{}-01-01'.format(year),
-                                  '{}-12-31'.format(year)).select('classification').mosaic()
-        irr_mask = irr_min_yr_mask.updateMask(irr.lt(1))
-
-        desc = 'etf_{}_{}'.format(year, mask_type)
-
-        if check_dir:  # If files have already been downloaded to local machine, do not export them.
-            f = os.path.join(check_dir, '{}.csv'.format(desc))
-            if os.path.exists(f):
-                print(desc, 'exists, skipping')
-                continue
-
-        coll = ee.ImageCollection(ETF).filterDate('{}-01-01'.format(year), '{}-12-31'.format(year))
-        coll = coll.filterBounds(feature_coll)
-        scenes = coll.aggregate_histogram('system:index').getInfo()  # getInfo() is supposed to be bad
-
-        selectors = ['FID']
-        for img_id in scenes:  # No ee functions here now, but that didn't seem to help much.
-            splt = img_id.split('_')
-            _name = '_'.join(splt[-3:])
-            selectors.append(_name)
-        # print(selectors)
-
-        if mask_type == 'no_mask':
-            all_etf_img = coll.map(lambda img: img.divide(10000).clip(feature_coll.geometry()))
-        elif mask_type == 'irr':
-            all_etf_img = coll.map(lambda img: img.divide(10000).clip(feature_coll.geometry()).mask(irr_mask))
-        elif mask_type == 'inv_irr':
-            all_etf_img = coll.map(lambda img: img.divide(10000).clip(feature_coll.geometry()).mask(irr.gt(0)))
-
-        bands = all_etf_img.toBands()
-
-        data = bands.reduceRegions(collection=feature_coll,
-                                   reducer=ee.Reducer.mean(),
-                                   scale=30)
-
-        # TODO extract pixel count to filter data
         # extract pixel count to filter data
         count = bands.reduceRegions(collection=feature_coll,
                                     reducer=ee.Reducer.count())
@@ -351,17 +275,18 @@ def clustered_field_etf_1(feature_coll, bucket=None, mask_type='irr', check_dir=
                 data,
                 description=desc,
                 bucket=bucket,
-                fileNamePrefix='MT_CU_2024/{}/{}_2'.format(county, desc),
+                fileNamePrefix='MT_CU_2024/{}/{}'.format(county, desc),
                 fileFormat='CSV',
                 selectors=selectors)
             task2 = ee.batch.Export.table.toCloudStorage(
                 count,
                 description=desc,
                 bucket=bucket,
-                fileNamePrefix='MT_CU_2024/{}/{}_2_ct'.format(county, desc),
+                fileNamePrefix='MT_CU_2024/{}/{}_ct'.format(county, desc),
                 fileFormat='CSV',
                 selectors=selectors)
-        else:
+
+        else:  # this one shouldn't really be reached.
             task1 = ee.batch.Export.table.toCloudStorage(
                 data,
                 description=desc,
@@ -389,13 +314,12 @@ if __name__ == '__main__':
         d = 'C:/Users/CND571/Documents/Data/etof_files'
 
     is_authorized()
-    bucket_ = 'wudr'
-    # bucket_ = 'mt_cu_2024'
+    # bucket_ = 'wudr'
+    bucket_ = 'mt_cu_2024'
     # fields = 'users/dgketchum/fields/tongue_9MAY2023'
-    fields = 'projects/ee-hehaugen/assets/SID_15FEB2024/033'  # Is this the right format?
+    fields = 'projects/ee-hehaugen/assets/SID_15FEB2024/033'
     for mask in ['inv_irr', 'irr']:
         chk = os.path.join(d, mask)
         clustered_field_etf(fields, bucket_, debug=False, mask_type=mask, check_dir=chk)
-        # This works! However, I don't understand the outputs. - not prepped yet, will not make sense
 
 # ========================= EOF ====================================================================

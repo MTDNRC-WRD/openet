@@ -423,11 +423,13 @@ def corrected_gridmet_db(con, gridmet_points, fields_join, gridmet_tb, gridmet_r
     e2 = pd.to_datetime(end)
 
     #  determining what data is missing
+    print("Looking for missing data...")
     target_gfids = []
     for idx in fields['gfid'].unique():  # makes sure repeated gfids in selection don't create redundant records.
         if ~existing_fields['gfid'].isin([idx]).any():
             target_gfids.append([idx, start, end])
         else:
+            # This can take a long time, because it's loading and checking the dates for each point individually.
             existing_dates = pd.read_sql("SELECT DISTINCT date FROM {} WHERE gfid={}".format(gridmet_tb, idx), con)
             existing_dates = pd.to_datetime(existing_dates['date'])
             s1 = existing_dates.min()
@@ -455,6 +457,7 @@ def corrected_gridmet_db(con, gridmet_points, fields_join, gridmet_tb, gridmet_r
         gridmet_pts.index = gridmet_pts['GFID']
 
         # Loading correction surfaces
+        print('Loading correction factors...')
         rasters = []
         for v in ['eto', 'etr']:
             [rasters.append(os.path.join(gridmet_ras, 'gridmet_corrected_{}_{}.tif'.format(v, m))) for m in range(1, 13)]
@@ -959,14 +962,14 @@ if __name__ == '__main__':
     rasters_ = os.path.join(gm_d, 'correction_surfaces_aea')  # correction surfaces, one for each month and variable.
     # Management factor and effective precip table files are called in functions.
 
-    # # Loading in state irrigation dataset (takes a few seconds to load)
-    # # mt_fields = gpd.read_file("C:/Users/CND571/Documents/Data/sid_30JAN2024_all.shp")  # 43k fields
-    # mt_fields = gpd.read_file("C:/Users/CND571/Documents/Data/statewide_irrigation_dataset_15FEB2024/"
-    #                           "statewide_irrigation_dataset_15FEB2024_5071.shp")  # 52k fields
-    # mt_fields['county'] = mt_fields['FID'].str.slice(0, 3)  # old has lowercase
-    # # county_count = mt_fields['county'].value_counts(ascending=True)  # Start with counties with fewest fields.
-    # county_count = mt_fields['county'].value_counts()  # Start with counties with most fields.
-    # print(county_count)
+    # Loading in state irrigation dataset (takes a few seconds to load)
+    # mt_fields = gpd.read_file("C:/Users/CND571/Documents/Data/sid_30JAN2024_all.shp")  # 43k fields
+    mt_fields = gpd.read_file("C:/Users/CND571/Documents/Data/statewide_irrigation_dataset_15FEB2024/"
+                              "statewide_irrigation_dataset_15FEB2024_5071.shp")  # 52k fields
+    mt_fields['county'] = mt_fields['FID'].str.slice(0, 3)  # old has lowercase
+    # county_count = mt_fields['county'].value_counts(ascending=True)  # Start with counties with fewest fields.
+    county_count = mt_fields['county'].value_counts()  # Start with counties with most fields.
+    print(county_count)
 
     # pos_start = '2016-01-01'
     # pos_end = '2022-12-31'

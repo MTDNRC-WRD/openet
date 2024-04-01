@@ -143,7 +143,7 @@ def landsat_time_series_multipolygon(in_shp, csv_dir, years, out_csv, out_csv_ct
 
     :param in_shp:
     :param csv_dir:
-    :param years:
+    :param years: list of years to include in timeseries.
     :param out_csv:
     :param out_csv_ct:
     :return:
@@ -186,6 +186,7 @@ def landsat_time_series_multipolygon(in_shp, csv_dir, years, out_csv, out_csv_ct
         # see e.g., https://code.earthengine.google.com/5ea8bc8c6134845a8c0c81a4cdb99fc0
         # TODO: examine these thresholds, prob better to extract pixel count to filter data
 
+        # diff_for and dif_back remove values that are too different from each other?
         diff_back = field.diff().values
         field = pd.DataFrame(index=field.index, columns=field.columns,
                              data=np.where(diff_back < -0.1, np.nan, field.values))
@@ -201,6 +202,7 @@ def landsat_time_series_multipolygon(in_shp, csv_dir, years, out_csv, out_csv_ct
         if 'ndvi' in csv_dir:
             field[field.values < 0.2] = np.nan
         # End of low etof value handling.
+
         df = field.copy()
 
         ct = ~pd.isna(field)

@@ -217,8 +217,10 @@ def clustered_field_etf(feature_coll, bucket=None, debug=False, mask_type='irr',
         desc = 'etf_{}_{}'.format(year, mask_type)
 
         if check_dir:  # If files have already been downloaded to local machine, do not export them.
-            f = os.path.join(check_dir, '{}.csv'.format(desc))
-            if os.path.exists(f):
+            # year must have both files, otherwise it will need to be recomputed.
+            f1 = os.path.join(check_dir, '{}.csv'.format(desc))
+            f2 = os.path.join(check_dir, '{}_ct.csv'.format(desc))
+            if os.path.exists(f1) and os.path.exists(f2):
                 print(desc, 'exists, skipping')
                 continue
 
@@ -264,7 +266,7 @@ def clustered_field_etf(feature_coll, bucket=None, debug=False, mask_type='irr',
 
         data = bands.reduceRegions(collection=feature_coll,
                                    reducer=ee.Reducer.mean(),
-                                   scale=30)
+                                   scale=30)  # This appears to produce more non-zero data than the pixel count... why?
 
         # extract pixel count to filter data
         count = bands.reduceRegions(collection=feature_coll,

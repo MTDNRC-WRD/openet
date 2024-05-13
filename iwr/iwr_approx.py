@@ -356,7 +356,12 @@ def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', sea
     annual_p = df['PP'].resample('Y').sum() / 25.4
 
     dtmm = df['MM'].groupby([df.index.month, df.index.day]).mean() * 9 / 5 + 32
-    yr_ind = pd.date_range('2000-01-01', '2000-12-31', freq='d')
+    if len(dtmm) > 365:
+        # For leap years/longer periods of record
+        yr_ind = pd.date_range('2000-01-01', '2000-12-31', freq='d')
+    else:
+        # For single non-leap years
+        yr_ind = pd.date_range('1998-01-01', '1998-12-31', freq='d')
     dtmm.index = yr_ind
 
     if not season_start:  # Using daily data
@@ -408,7 +413,10 @@ def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', sea
     # months = (dates1.month - 1).to_list()
     pct_day_hrs = sunshine[start_month:end_month]
 
-    dates = [pd.to_datetime('2000-{}-{}'.format(d.month, d.day)) for d in dates]
+    if len(dtmm) > 365:
+        dates = [pd.to_datetime('2000-{}-{}'.format(d.month, d.day)) for d in dates]
+    else:
+        dates = [pd.to_datetime('1998-{}-{}'.format(d.month, d.day)) for d in dates]
     df = pd.DataFrame(np.array([d_accum, pct_season, temps, precips, pct_day_hrs]).T,
                       columns=['accum_day', 'pct_season', 't', 'rain', 'p'],
                       index=dates)

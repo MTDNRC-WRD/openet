@@ -223,8 +223,8 @@ def area_fraction_file(cnty, sid_dir, etf_dir):
     area.index = area['FID']
     area = area.drop(['FID'], axis=1)
     area['area_m2'] = area['geometry'].area
-    print("{} Tiny Fields!".format(len(area[area['area_m2'] < 1])))
-    print(area[area['area_m2'] < 1]['area_m2'])
+    # print("{} Tiny Fields!".format(len(area[area['area_m2'] < 1])))
+    # print(area[area['area_m2'] < 1]['area_m2'])
 
     for year in range(1987, 2024):
         outfile = os.path.join(etf_dir, cnty, 'etf_{}_irr_area.csv'.format(year))
@@ -295,7 +295,7 @@ def data_quality_plot(county_select):
         plt.plot(alldata[i].count() / len(alldata[i]), c=colors[i], ls=lss[i % 4],
                  label="{}: {} ({} fields)".format(cnty, COUNTIES[cnty], len(alldata[i])))
     plt.grid()
-    plt.legend()
+    # plt.legend()
     plt.ylim(0, 1)
     plt.ylabel('fraction of fields with data')
 
@@ -338,7 +338,7 @@ def data_quality_plot(county_select):
         cnty = county_select[i]
         plt.plot(alldata[i].mean(), c=colors[i], ls=lss[i % 4],
                  label="{}: {} ({} fields)".format(cnty, COUNTIES[cnty], len(alldata[i])))
-    plt.legend()
+    # plt.legend()
     plt.ylabel('average fraction of field covered by etof data')
     plt.ylim(0, 1)
     plt.grid()
@@ -530,26 +530,34 @@ def misc():
     #     else:
     #         os.mkdir(file_path)
 
-    # # Looking for mistaken tiny fields (defined as area < 1 m^2). 21 identified in 099, 43 across whole dataset.
-    # sid_dir = os.path.join(d, 'statewide_irrigation_dataset_15FEB2024')
-    # tiny_fields = []
-    # for i in COUNTIES.keys():
-    #     sid_file = os.path.join(sid_dir, '{}.shp'.format(i))
-    #     if os.path.isfile(sid_file):
-    #         area = gpd.read_file(sid_file)
-    #         area = area.to_crs("EPSG:5071")
-    #         area.index = area['FID']
-    #         area = area.drop(['FID'], axis=1)
-    #         area['area_m2'] = area['geometry'].area
-    #         tiny_fields.append(list(area[area['area_m2'] < 1].index))
-    #         # if len(area[area['area_m2'] < 1]) > 0:
-    #         #     # print("{} Tiny Fields!".format(len(area[area['area_m2'] < 1])))
-    #         #     print(list(area[area['area_m2'] < 1].index))
-    # tiny_fields = [i for row in tiny_fields for i in row]
-    # # print(tiny_fields)
-    # print(len(tiny_fields))
-    # for i in range(len(tiny_fields)):
-    #     print(tiny_fields[i])
+    # Looking for mistaken tiny fields
+    # When defined as area < 1 m^2: 21 identified in 099, 43 across whole dataset.
+    # When defined as area < 100 m^2: 72 identified across whole dataset.
+    # When defined as area < 500 m^2: 87 identified across whole dataset.
+    # When defined as area < 1000 m^2: 98 identified across whole dataset.
+    size = 1000
+    sid_dir = os.path.join(d, 'statewide_irrigation_dataset_15FEB2024')
+    tiny_fields = []
+    for i in COUNTIES.keys():
+        sid_file = os.path.join(sid_dir, '{}.shp'.format(i))
+        if os.path.isfile(sid_file):
+            area = gpd.read_file(sid_file)
+            area = area.to_crs("EPSG:5071")
+            area.index = area['FID']
+            area = area.drop(['FID'], axis=1)
+            area['area_m2'] = area['geometry'].area
+            tiny_fields.append(list(area[area['area_m2'] < size].index))
+            # if len(area[area['area_m2'] < size]) > 0:
+            #     # print("{} Tiny Fields!".format(len(area[area['area_m2'] < size])))
+            #     print(list(area[area['area_m2'] < size].index))
+    tiny_fields = [i for row in tiny_fields for i in row]
+    # print(tiny_fields)
+    print(len(tiny_fields))
+    for i in range(len(tiny_fields)):
+        print(tiny_fields[i])
+    tiny_counties = [x[:3] for x in tiny_fields]
+    print(set(tiny_counties))
+    print("{} fields < {} m^2 in {} counties".format(len(tiny_fields), size, len(set(tiny_counties))))
 
 
 def check_files(directory):
@@ -632,61 +640,61 @@ if __name__ == '__main__':
     # PART ZERO: SETUP
     d = 'C:/Users/CND571/Documents/Data'
 
-    # Counties with Part One completed: (smallest to largest, as of 3/27/24)
-    com_counties = ['019', '033', '061', '101', '051', '041', '091', '053', '015', '093', '055', '023', '021',
-                    '065', '017', '071', '099', '047']
-    # largest to smallest remaining counties, as of 3/26/24
-    rem_counties = ['067', '097', '003', '111', '009', '005', '057', '049', '083', '001', '043', '081', '013',
-                    '073', '105', '031', '095', '007', '103', '087', '029', '077', '059', '063', '085', '035',
-                    '039', '089', '027', '107', '079', '045', '069', '075', '037', '093', '015', '053', '091']
-    county = rem_counties[3]  # through 2 and -5 completed on GEE, 3 running now.
+    # All counties, smallest to largest
+    counties = ['019', '033', '061', '101', '051', '041', '091', '053', '015', '093', '055', '037', '075', '023',
+                '069', '045', '079', '107', '021', '027', '089', '039', '035', '085', '065', '063', '059', '077',
+                '029', '017', '087', '103', '007', '095', '013', '043', '001', '083', '049', '057', '005', '009',
+                '003', '097', '067', '071', '031', '105', '073', '081', '099', '111', '047']
+    # county = counties[-1]
     # counties larger than 2000 will be split.
 
     # # PART ONE: GOOGLE EARTH ENGINE DATA TO BUCKET
+    # # Completed on 4/15/24
     # ee_loc = 'projects/ee-hehaugen/assets/SID_15FEB2024/'
     # # bucket = 'wudr'  # David's bucket
     # bucket = 'mt_cu_2024'  # Hannah's bucket
     # county_ee_data_to_bucket(county, ee_loc, bucket, d)
 
     # # PART TWO: Turning pixel counts into fractional area coverage, also combines split counties.
+    # # Completed on 4/15/24
     # sid_dir_ = os.path.join(d, 'statewide_irrigation_dataset_15FEB2024')
     # etf_dir_ = os.path.join(d, 'ssebop')
     # # area_fraction_file('047', sid_dir_, etf_dir_)
-    # for i in tqdm(com_counties, total=len(com_counties)):
+    # for i in tqdm(counties, total=len(counties)):
     #     area_fraction_file(i, sid_dir_, etf_dir_)
 
     # # PART 2.5: LOOK AT DATA QUALITY
     # # counties = ['047']
-    # data_quality_plot(com_counties)
+    # data_quality_plot(counties[:27])
+    # data_quality_plot(counties[27:])
     # # check_fields_horizontal(counties[3])
     # # for i in range(6, 9):
     # #     check_fields_horizontal(counties[i])
     # # etf_ts_plot('019')
     # plt.show()
 
-    # # PART THREE: FIX TIME SERIES DATA
-    # # dtype = 'extracts'
+    # PART THREE: FIX TIME SERIES DATA
+    # dtype = 'extracts'
     # county = '019'
-    #
-    # project_ws = os.path.join(d, 'ssebop')
-    # tables = os.path.join(project_ws, 'landsat')
-    #
-    # yrs = [x for x in range(2000, 2021)]
-    # # shp = os.path.join(project_ws, 'gis', '{}_fields.shp'.format(project))
-    # shp = os.path.join(d, 'statewide_irrigation_dataset_15FEB2024', '{}.shp'.format(county))
-    # # shp = 'C:/Users/CND571/Documents/Data/statewide_irrigation_dataset_15FEB2024/{}.shp'.format(county)
-    #
-    # # directory with exported ee csv files
-    # # ee_data = os.path.join(project_ws, 'landsat', dtype, 'etf', 'irr')
-    # ee_data = os.path.join(project_ws, county)
-    #
-    # # Out files
-    # src = os.path.join(tables, '{}_{}_{}_2.csv'.format(county, 'etf', 'irr'))
-    # src_ct = os.path.join(tables, '{}_{}_{}_ct_2.csv'.format(county, 'etf', 'irr'))
-    #
-    # landsat_time_series_multipolygon(shp, ee_data, yrs, src, src_ct)
+
+    project_ws = os.path.join(d, 'ssebop')
+    tables = os.path.join(project_ws, 'landsat')
+
+    yrs = [x for x in range(1987, 2022)]  # looks like a year lag, so only Jan/Feb 2023 ssebop data available.
+
+    for county in tqdm(counties[::-1], total=len(counties)):
+        shp = os.path.join(d, 'statewide_irrigation_dataset_15FEB2024', '{}.shp'.format(county))
+
+        # directory with exported ee csv files
+        ee_data = os.path.join(project_ws, county)
+
+        # Out files
+        src = os.path.join(tables, '{}_{}_{}.csv'.format(county, 'etf', 'irr'))
+        src_ct = os.path.join(tables, '{}_{}_{}_ct.csv'.format(county, 'etf', 'irr'))
+
+        landsat_time_series_multipolygon(shp, ee_data, yrs, src, src_ct)
 
     # misc()
-    check_files(os.path.join(d, 'ssebop'))
+    # check_files(os.path.join(d, 'ssebop'))
 
 # ========================= EOF ====================================================================

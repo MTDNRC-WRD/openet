@@ -151,7 +151,7 @@ def landsat_time_series_multipolygon(in_shp, csv_dir, years, out_csv, out_csv_ct
     gdf = gpd.read_file(in_shp)
     gdf.index = gdf['FID']
 
-    print(csv_dir)
+    # print(csv_dir)
 
     adf, ctdf, first = None, None, True
 
@@ -223,7 +223,7 @@ def landsat_time_series_multipolygon(in_shp, csv_dir, years, out_csv, out_csv_ct
         else:
             adf = pd.concat([adf, df], axis=0, ignore_index=False, sort=True)
             ctdf = pd.concat([ctdf, ct], axis=0, ignore_index=False, sort=True)
-        print(yr)
+        # print(yr)
 
     adf.to_csv(out_csv)
     ctdf.to_csv(out_csv_ct)

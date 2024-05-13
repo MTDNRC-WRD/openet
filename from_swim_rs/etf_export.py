@@ -182,13 +182,14 @@ def flux_tower_etf(shapefile, bucket=None, debug=False, mask_type='irr', check_d
 # This is the one that I want to be using, have added pixel count as output
 def clustered_field_etf(feature_coll, bucket=None, debug=False, mask_type='irr', check_dir=None, county=None):
     """ Create CSV files from Google Earth Engine data.
-    This is timing out about 50% of the time with a county with 600 fields... :(
 
     feature_coll: gee asset ID for field boundaries
     bucket: name of Google cloud storage bucket to store csv files in.
     debug: ?
     mask_type: ?
-    check_dir: ?
+    check_dir: str, optional, if provided, function will check this local directory for the output files that
+    it is about to generate. For each file/task, if the file already exists locally, the task will not be
+    submitted to gee.
     """
 
     feature_coll = ee.FeatureCollection(feature_coll)
@@ -309,6 +310,91 @@ def clustered_field_etf(feature_coll, bucket=None, debug=False, mask_type='irr',
         print(desc)
 
 
+# This is the altered one for OpenET data, should get both ensemble et and eto to calculate etf later.
+# Nevermind, don't do that, Will is making me a very nice server, where I won't have to mess with that stuff.
+def clustered_field_etf_opnt(feature_coll, bucket=None, debug=False, mask_type='no_mask', check_dir=None, county=None):
+    """ Create CSV files from Google Earth Engine data.
+
+    feature_coll: gee asset ID for field boundaries
+    bucket: name of Google cloud storage bucket to store csv files in.
+    debug: ?
+    mask_type: ?
+    check_dir: str, optional, if provided, function will check this local directory for the output files that
+    it is about to generate. For each file/task, if the file already exists locally, the task will not be
+    submitted to gee.
+    """
+
+    feature_coll = ee.FeatureCollection(feature_coll)
+
+    # 1985 vs 1987?
+
+    s, e = '1985-01-01', '2023-12-31'
+
+    # Options for 'use'
+    opnt_prov = 'projects/openet/assets/ensemble/conus/gridmet/monthly/provisional'
+    opnt_publ = "OpenET/ENSEMBLE/CONUS/GRIDMET/MONTHLY/v2_0"
+    opnt_eto = 'projects/openet/reference_et/gridmet/monthly'
+
+    use_this = opnt_eto
+    # select_this = ['et_ensemble_mad']
+    select_this = ['eto']
+
+    coll = ee.ImageCollection(use_this).filterDate(s, e).select(select_this)
+    coll = coll.filterBounds(feature_coll)
+    scenes = coll.aggregate_histogram('system:index').getInfo()
+
+    first, bands = True, None
+    selectors = ['FID']
+
+    for img_id in scenes:
+
+        splt = img_id.split('_')
+        _name = '_'.join(splt[-3:])
+
+        selectors.append(_name)
+
+        full_path = '{}/{}'.format(use_this, img_id)
+        etf_img = ee.Image(full_path).select(select_this).rename(_name)
+        # so that not all the bands are named the same thing.
+        # etf_img = etf_img.divide(10000)  # Why? dunno
+
+        if mask_type == 'no_mask':
+            etf_img = etf_img.clip(feature_coll.geometry())
+
+        if first:
+            bands = etf_img
+            first = False
+        else:
+            bands = bands.addBands([etf_img])
+
+    data = bands.reduceRegions(collection=feature_coll,
+                               reducer=ee.Reducer.mean(),
+                               scale=30)
+
+    if county:
+        desc = 'eto_{}_{}_{}'.format(county, s[:4], e[:4])
+        task1 = ee.batch.Export.table.toCloudStorage(
+            data,
+            description=desc,
+            bucket=bucket,
+            fileNamePrefix='MT_CU_2024/provisional_et/{}'.format(desc),
+            fileFormat='CSV',
+            selectors=selectors)
+
+    else:  # this one shouldn't really be reached.
+        desc = 'eto_{}_{}'.format(s[:4], e[:4])
+        task1 = ee.batch.Export.table.toCloudStorage(
+            data,
+            description=desc,
+            bucket=bucket,
+            fileNamePrefix='MT_CU_2024/provisional_et/{}'.format(desc),
+            fileFormat='CSV',
+            selectors=selectors)
+
+    task1.start()
+    print(desc)
+
+
 if __name__ == '__main__':
 
     d = '/media/research/IrrigationGIS/swim'
@@ -319,9 +405,13 @@ if __name__ == '__main__':
     # bucket_ = 'wudr'
     bucket_ = 'mt_cu_2024'
     # fields = 'users/dgketchum/fields/tongue_9MAY2023'
-    fields = 'projects/ee-hehaugen/assets/SID_15FEB2024/033'
-    for mask in ['inv_irr', 'irr']:
-        chk = os.path.join(d, mask)
-        clustered_field_etf(fields, bucket_, debug=False, mask_type=mask, check_dir=chk)
+    fields = 'projects/ee-hehaugen/assets/SID_15FEB2024/091'
+
+    # Testing this, should output eta
+    clustered_field_etf_opnt(fields, bucket_, county='091')
+
+    # for mask in ['inv_irr', 'irr']:
+    #     chk = os.path.join(d, mask)
+    #     clustered_field_etf(fields, bucket_, debug=False, mask_type=mask, check_dir=chk)
 
 # ========================= EOF ====================================================================

@@ -1,6 +1,4 @@
 
-# Everything needed to complete statewide analysis, outline for now
-
 import os
 
 import pandas as pd
@@ -99,7 +97,7 @@ COLUMN_ORDER = ['date',
                 'etr_mm_uncorr',
                 'eto_mm_uncorr']
 
-# '011', '025' and '109' have no fields in the 15FEB24 Statewide Irrigation Dataset.
+# '011', '025', and '109' have no fields in the 15FEB24 Statewide Irrigation Dataset.
 COUNTIES = {'001': 'Beaverhead', '003': 'Big Horn', '005': 'Blaine', '007': 'Broadwater', '009': 'Carbon',
             '011': 'Carter', '013': 'Cascade', '015': 'Chouteau', '017': 'Custer', '019': 'Daniels',
             '021': 'Dawson', '023': 'Deer Lodge', '025': 'Fallon', '027': 'Fergus', '029': 'Flathead',
@@ -212,6 +210,18 @@ def init_db_tables(con):
                 );
                 """)  # Check fid against field_data, check years against available gridmet?
     cur.execute("""
+                CREATE TABLE IF NOT EXISTS static_iwr_results
+                (fid TEXT NOT NULL,
+                frac_irr REAL,
+                mf_periods TEXT,
+                mfs REAL,
+                etos REAL,
+                etbc REAL,
+                dnrc_cu REAL,
+                PRIMARY KEY (fid, mf_periods) ON CONFLICT IGNORE
+                );
+                """)  # Are there other fields I need/ones to delete? Is mf_periods or mfs a better index?
+    cur.execute("""
                 CREATE TABLE IF NOT EXISTS irrmapper
                 (fid TEXT NOT NULL,
                 year DATE NOT NULL,
@@ -265,13 +275,6 @@ def update_etof_db(con, etof_dir, etof_tb):
     # We are trying to recover the "000" as the county code to check if these files need to be added.
     for filename in os.listdir(etof_dir):
         # county = filename[-7:-4]  # old, no years at end.
-        county = filename[-17:-14]
-        counties.append(county)
-    counties = pd.DataFrame(data=counties, columns=['county'])
-
-    # option for provisional openet, don't need this now?
-    # files like "MT_CU_2024_provisional_et_etX_XXX_XXXX_XXXX.csv".format(a,o, or f; FIPS code; start year; end year)
-    for filename in os.listdir(etof_dir):
         county = filename[-17:-14]
         counties.append(county)
     counties = pd.DataFrame(data=counties, columns=['county'])
@@ -917,7 +920,7 @@ def cu_analysis_db(con, shp, gridmet, start, end, etof, out):
     print()
 
 
-# Update this one w/ checking
+# Update this one w/ checking.
 def iwr_static_cu_analysis_db(con, shp, gridmet, start, end, etof, out, irrmapper=False):
     """ This only needs to be done once (twice for irrmapper?) whereas the other IWR calcs need
     to be done once for each year. So it's its own function."""
@@ -1033,7 +1036,7 @@ def iwr_static_cu_analysis_db(con, shp, gridmet, start, end, etof, out, irrmappe
     print()
 
 
-# I think this works nicely... almost
+# I think this works nicely... almost.
 def cu_analysis_db_1(con, shp, gridmet, etof, out, start=1985, end=2024,  irrmapper=False):
     """
     Calculate average seasonal consumptive use with both IWR/DNRC and OpenET methods.
@@ -1331,14 +1334,13 @@ if __name__ == '__main__':
     # It initializes all right, but is having a hard time checking for inclusion.
 
     # # STEP ZERO: CREATE DATABASE TABLES
-    # sqlite database connection
     # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/tutorial_gm.db")
     # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/opnt_analysis_02232024.db")  # has additional met data
     # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/opnt_analysis_02132024.db")  # has 6 counties
     # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/opnt_analysis_03042024.db")  # has all counties gm match
-    # conec = sqlite3.connect("F:/opnt_analysis_03042024.db")  # has gm data for all counties, do not open in gui!
-    conec = sqlite3.connect("C:/Users/CND571/Documents/Data/random_05082024.db")
-    # sqlite database table names (better way to do this?)
+    conec = sqlite3.connect("F:/opnt_analysis_03042024_Copy.db")  # has gm data for all counties, do not open in gui!
+    # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/random_05082024.db")
+    # sqlite database table names
     gm_ts, fields_db, results, etof_db, irr_db = 'gridmet_ts', 'field_data', 'field_cu_results', 'opnt_etof', 'irrmapper'
     # Initialize tables with correct column names/types/primary keys
     init_db_tables(conec)
@@ -1347,26 +1349,26 @@ if __name__ == '__main__':
     update_irrmapper_table(conec)
 
     # # STEP TWO: UPDATE ETOF DB TABLE
-    etof_loc = "C:/Users/CND571/Documents/Data/etof_files/experiment"  # loads 019 and 091 right now
-    # update_etof_db_1(conec, etof_loc, etof_db)
+    etof_loc = "C:/Users/CND571/Documents/Data/etof_files/old"  # loads all data
+    update_etof_db_1(conec, etof_loc, etof_db)
 
-    # # STEP THREE: RUN OTHER 3 TABLES TO GET RESULTS
-    # gridmet information
-    gm_d = 'F:/openet_pilot/gridmet'  # location of general gridmet files
-    gridmet_cent = os.path.join(gm_d, 'gridmet_centroids_MT.shp')
-    rasters_ = os.path.join(gm_d, 'correction_surfaces_aea')  # correction surfaces, one for each month and variable.
-    # # fields subset
-    # mt_fields = gpd.read_file("F:/openet_pilot/statewide_irrigation_dataset_15FEB2024_5071.shp")  # takes a bit (8.3s)
-    # mt_fields['county'] = mt_fields['FID'].str.slice(0, 3)
-    # mt_fields = mt_fields[mt_fields['county'] == '019']
-    # # print(len(mt_fields))
-    # recent dates
-    pos_start = '2016-01-01'
-    pos_end = '2022-12-31'
-    # now run db stuff
-    # gridmet_match_db(conec, mt_fields, gridmet_cent, fields_db)
-    corrected_gridmet_db_1(conec, gridmet_cent, fields_db, gm_ts, rasters_, pos_start, pos_end)
-    cu_analysis_db_1(conec, fields_db, gm_ts, etof_db, results, 2016, 2023)
+    # # # STEP THREE: RUN OTHER 3 TABLES TO GET RESULTS
+    # # gridmet information
+    # gm_d = 'F:/openet_pilot/gridmet'  # location of general gridmet files
+    # gridmet_cent = os.path.join(gm_d, 'gridmet_centroids_MT.shp')
+    # rasters_ = os.path.join(gm_d, 'correction_surfaces_aea')  # correction surfaces, one for each month and variable.
+    # # # fields subset
+    # # mt_fields = gpd.read_file("F:/openet_pilot/statewide_irrigation_dataset_15FEB2024_5071.shp")  # takes a bit (8.3s)
+    # # mt_fields['county'] = mt_fields['FID'].str.slice(0, 3)
+    # # mt_fields = mt_fields[mt_fields['county'] == '019']
+    # # # print(len(mt_fields))
+    # # recent dates
+    # pos_start = '2016-01-01'
+    # pos_end = '2022-12-31'
+    # # now run db stuff
+    # # gridmet_match_db(conec, mt_fields, gridmet_cent, fields_db)
+    # corrected_gridmet_db_1(conec, gridmet_cent, fields_db, gm_ts, rasters_, pos_start, pos_end)
+    # cu_analysis_db_1(conec, fields_db, gm_ts, etof_db, results, 2016, 2023)
 
     # # STEP FOUR: CHECK RESULTS
 
@@ -1378,88 +1380,5 @@ if __name__ == '__main__':
 
     conec.commit()
     conec.close()
-
-    # # After fetching etof csv files, load them into db
-    # # There will be a problem here with the split fields.
-    # etof_loc = "C:/Users/CND571/Documents/Data/etof_files"
-    # # update_etof_db(conec, etof_loc, etof_db)
-    # cnty = ['091']
-    # check_etof_data(cnty, etof_loc, True)
-
-    # # Testing etf data format
-    # cnty = '091'
-    # path = os.path.join(etof_loc, "ensemble_monthly_etof_{}.csv".format(cnty))
-    # etof_data = pd.read_csv(path)
-    # print(etof_data)
-    #
-    # opnt_etof_from_eta_eto(cnty)  # Not needed anymore?
-
-    # # gridmet information
-    # gm_d = 'C:/Users/CND571/Documents/Data/gridmet'  # location of general gridmet files
-    # gridmet_cent = os.path.join(gm_d, 'gridmet_centroids_MT.shp')
-    # rasters_ = os.path.join(gm_d, 'correction_surfaces_aea')  # correction surfaces, one for each month and variable.
-    # # Management factor and effective precip table files are called in functions.
-    #
-    # # Loading in state irrigation dataset (takes a few seconds to load)
-    # # mt_fields = gpd.read_file("C:/Users/CND571/Documents/Data/sid_30JAN2024_all.shp")  # 43k fields
-    # mt_fields = gpd.read_file("C:/Users/CND571/Documents/Data/statewide_irrigation_dataset_15FEB2024/"
-    #                           "statewide_irrigation_dataset_15FEB2024_5071.shp")  # 52k fields
-    # print(len(mt_fields))
-    # mt_fields['county'] = mt_fields['FID'].str.slice(0, 3)  # old has lowercase
-    # # county_count = mt_fields['county'].value_counts(ascending=True)  # Start with counties with the fewest fields.
-    # county_count = mt_fields['county'].value_counts()  # Start with counties with most fields.
-    # # print(county_count)
-
-    # pos_start = '2016-01-01'
-    # pos_end = '2022-12-31'
-
-    # Running analysis for 6 smallest counties
-    # This will only update with new information. Each step checks for prior inclusion in db.
-    # i = 0
-    # for i in range(5):  # maybe this is better, not doing
-
-    # counties = pd.read_sql("SELECT DISTINCT county FROM {}".format(fields_db), conec)
-
-    # for i in tqdm(range(len(county_count)), total=len(county_count)):
-    #     county_id = county_count.index[i]
-    #     # print()
-    #     print("{} County ({})".format(COUNTIES[county_id], county_id))
-    #     county_fields = mt_fields[mt_fields['county'] == county_id]
-    #     # print(county_fields)
-    #     # gridmet_match_db(conec, county_fields, gridmet_cent, fields_db)  # short-ish, complete after 7? hours running
-    #     # corrected_gridmet_db(conec, gridmet_cent, fields_db, gm_ts, rasters_, pos_start, pos_end)  # very long
-    #     cu_analysis_db(conec, fields_db, gm_ts, pos_start, pos_end, etof_db, results)  # short
-    #     # county_gfids = pd.read_sql("SELECT DISTINCT gfid FROM {} WHERE county='{}'".format(fields_db, county_id), conec)
-    #     # more_gridmet_vars(conec, ['u10_ms'], gridmet_cent, fields_db, gm_ts, rasters_,
-    #     #                   pos_start, pos_end, selection=county_gfids)  # very long, should always use selection
-    #     # more_gridmet_vars(conec, ['q_kgkg', 'u10_ms', 'srad_wm2'], gridmet_cent, fields_db, gm_ts, rasters_,
-    #     #                   pos_start, pos_end, selection=county_gfids)  # very long, should always use selection
-
-    # # Testing speed of calling 5 gridmet points. roughly 30 seconds per gridmet point.
-    # pos_start = '1987-01-01'
-    # pos_end = '2023-12-31'  # Inclusive endpoint
-    # gridmets = pd.read_sql("SELECT DISTINCT gfid FROM {}".format(fields_db), conec)
-    # five_fields = gridmets[:160]
-    # # print(five_fields)
-    # corrected_gridmet_db(conec, gridmet_cent, fields_db, gm_ts, rasters_, pos_start, pos_end, five_fields)
-
-    # gridmets = pd.read_sql("SELECT DISTINCT gfid FROM {}".format(fields_db), conec)
-    # print()
-    # print('Total gridmet points: {}'.format(len(gridmets)))
-
-    # plot_results(conec)  # Only dependent on db tables existing
-
-    # Testing gridmet loading functions/ selective update functionality.
-    # pos_start = '2022-02-10'
-    # pos_end = '2022-02-20'
-    # pos_start = '2022-02-01'
-    # pos_end = '2022-02-28'
-    # corrected_gridmet_db(conec, gridmet_cent, fields_db, gm_ts, rasters_, pos_start, pos_end)
-    # more_gridmet_vars(conec, ['q_kgkg', 'u10_ms', 'srad_wm2'], gridmet_cent, fields_db, gm_ts, rasters_,
-    #                   pos_start, pos_end)
-
-    # # Save and close database connection (Is this necessary? Everything appeared to be working fine without it.)
-    # conec.commit()
-    # conec.close()
 
 # ========================= EOF ====================================================================

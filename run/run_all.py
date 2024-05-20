@@ -198,15 +198,16 @@ def init_db_tables(con):
                 CREATE TABLE IF NOT EXISTS field_cu_results
                 (fid TEXT NOT NULL,
                 year DATE NOT NULL,
+                irrmapper INTEGER NOT NULL,
                 frac_irr REAL,
-                mf_periods TEXT,
+                mf_periods TEXT NOT NULL,
                 mfs REAL,
                 etos REAL,
                 etbc REAL,
                 etof REAL,
                 opnt_cu REAL, 
                 dnrc_cu REAL,
-                PRIMARY KEY (fid, year) ON CONFLICT IGNORE
+                PRIMARY KEY (fid, year, irrmapper, mf_periods) ON CONFLICT IGNORE
                 );
                 """)  # Check fid against field_data, check years against available gridmet?
     cur.execute("""
@@ -783,144 +784,6 @@ def more_gridmet_vars(con, variables, gridmet_points, fields_join, gridmet_tb, g
     cur.close()
 
 
-# Stop using this one?
-def cu_analysis_db(con, shp, gridmet, start, end, etof, out):
-    """
-    Calculate average seasonal consumptive use with both IWR/DNRC and OpenET methods.
-
-    :con: sqlite database connection
-    :shp: str, name of table in sqlite database associated with field/gridmet lookup
-    :gridmet: str, name of table in sqlite database associated with gridmet data
-    :start: str in 'YYYY-MM-DD' format, beginning of period of study
-    :end: str in 'YYYY-MM-DD' format, end of period of study
-    :etof: str, name of table in sqlite database containing etof data
-    :out: str, name of table in sqlite database containing results of consumptive use analysis by field
-    """
-
-    # TODO: Make an irrigation mask for years where field was not irrigated.
-
-    print("Calculating consumptive use for fields")
-
-    # Want to make look for all new fields not calculated over the given time frame.
-    # fields = pd.read_sql("SELECT DISTINCT * FROM {}".format(shp), con, index_col='fid')
-    # existing_fields = pd.read_sql("SELECT DISTINCT fid, start, end FROM {}".format(out), con, index_col='fid')
-    fields = pd.read_sql("SELECT DISTINCT * FROM {}".format(shp), con)
-    existing_fields = pd.read_sql("SELECT DISTINCT fid, start, end FROM {}".format(out), con)
-    fields['start'] = pd.to_datetime(start)
-    fields['end'] = pd.to_datetime(end)
-    existing_fields['start'] = pd.to_datetime(existing_fields['start'])
-    existing_fields['end'] = pd.to_datetime(existing_fields['end'])
-    # print("goal fields:")
-    # print(fields)
-    # print()
-    # print("existing_fields:")
-    # print(existing_fields)
-    # print()
-
-    # remove duplicate field/time period combos
-    print("fields to fetch:")
-    gdf = (pd.merge(fields, existing_fields, how='outer', indicator=True)
-           .query('_merge == "left_only"')
-           .drop(columns=['_merge']))
-    # print(gdf)
-    # print()
-
-    # remove duplicate fields
-    # gdf = fields.loc[~fields['fid'].isin(existing_fields['fid'])]
-
-    if len(gdf) > 0:
-        # run data cu algorithm
-
-        # summary = deepcopy(gdf)
-        summary = pd.DataFrame(gdf['fid'])
-        summary['start'] = start
-        summary['end'] = end
-        summary['etos'] = [-99.99 for _ in summary['fid']]  # gridMET seasonal ET
-        summary['etbc'] = [-99.99 for _ in summary['fid']]  # blaney criddle ET based on gridMET weather data
-        summary['etof'] = [-99.99 for _ in summary['fid']]  # crop coefficient/etof from OpenET ensemble
-        summary['opnt_cu'] = [-99.99 for _ in summary['fid']]  # consumptive use calculated from gridMET ET
-        summary['dnrc_cu'] = [-99.99 for _ in summary['fid']]  # consumptive use calculated from blaney criddle ET
-
-        for i, row in tqdm(gdf.iterrows(), total=len(gdf)):
-            # Loading in gridMET
-            lon, lat = row['lon'], row['lat']
-            elev = row['elev_gm']  # elevation from retrieved gridmet station
-            # print(row['gfid'])
-            grd = pd.read_sql("SELECT date, eto_mm, tmin_c, tmax_c, prcp_mm FROM {} WHERE gfid={} AND date(date) "
-                              "BETWEEN date('{}') AND date('{}')".format(gridmet, row['gfid'], start, end), con)
-            # grd = pd.read_sql("SELECT date, eto_mm, tmin_c, tmax_c, prcp_mm FROM ? WHERE gfid=? AND date(date) "
-            #                   "BETWEEN date('?') AND date('?')", con, params=(gridmet, row['gfid'], start, end))
-            # rename variables needed in blaney_criddle calculations
-            grd = grd.rename(columns={'eto_mm': 'ETOS', 'tmin_c': 'MN', 'tmax_c': 'MX', 'prcp_mm': 'PP'})
-            grd.index = pd.to_datetime(grd['date'])
-
-            if row['itype'] == 'P':
-                pivot = True
-                carryover = 0.5
-            else:
-                pivot = False
-                carryover = 2.0
-
-            mfs = gpd.read_file('C:/Users/CND571/Documents/Data/management_factors/mt_county_management_factors.shp')
-
-            # Get management factor for county that the field is in
-            # How to determine the closest time period for management factor?
-            # time periods in 'the rule': 1964–1973 (9), 1973–2006 (33), 1997–2006 (9)
-            # HCU, recent HCU, and proposed use
-            # Overlay w/ rs data: none (0), 1985-2006 (21), 1997-2023 (26) ?
-            # Idea of running averages, por of 38 years of rs data, 1985-1995, 1990-2000, 1995-2005, 2000-2010,
-            mflist = ['1964', '1973', '1997']
-            mf = mfs[mfs['FIPS'] == row['fid'][:3]][mflist[2]].values[0]
-
-            # Calculating bc seasonal ET
-            grd['MM'] = (grd['MN'] + grd['MX']) / 2  # gridmet units are in mm and degrees celsius.
-            bc, start1, end1 = iwr_daily_fm(grd, lat, elev, pivot=pivot)
-
-            bc_cu = mf * bc['cu'].sum()  # add management factor
-            bc_pet = bc['u'].sum()
-            eff_precip = bc['ep'].sum()
-
-            # Masking daily gridMET data to growing season
-            grd['mday'] = ['{}-{}'.format(x.month, x.day) for x in grd.index]
-            target_range = pd.date_range('2000-{}-{}'.format(start1.month, start1.day),
-                                         '2000-{}-{}'.format(end1.month, end1.day))
-            accept = ['{}-{}'.format(x.month, x.day) for x in target_range]
-            grd['mask'] = [1 if d in accept else 0 for d in grd['mday']]
-            grd = grd[grd['mask'] == 1]
-
-            grd['ETOS'] = grd['ETOS'] / 25.4  # daily ET, mm to in
-            # Sum over the season, get total seasonal consumptive use by year
-            et_by_year = grd.groupby(grd.index.year)['ETOS'].sum()
-
-            # Loading in OpenET eotf/kc
-            df = pd.read_sql("SELECT time, etof FROM {} WHERE fid='{}' AND date(time) BETWEEN date('{}') "
-                             "AND date('{}')".format(etof, row['fid'], start, end), con,
-                             index_col='time', parse_dates={'time': '%Y-%m-%d'})
-            r_index = pd.date_range('2016-01-01', '2022-12-31', freq='D')  # avg over all data
-            df = df.reindex(r_index)
-            df = df.interpolate()
-            df['mday'] = ['{}-{}'.format(x.month, x.day) for x in df.index]
-            df['mask'] = [1 if d in accept else 0 for d in df['mday']]
-            df = df[df['mask'] == 1]
-
-            # Explanation of consumptive use calculations
-            # IWR: sum of monthly ET minus effective precip minus carryover, all times management factor
-            # sum(u_month - ep_month - co_month) * mf
-            # OpenET: average seasonal ET times crop coefficient minus effective precip and carryover
-            # (ETo * ETof) - ep - co
-
-            summary.loc[i, 'etos'] = et_by_year.mean()
-            summary.loc[i, 'etbc'] = bc_pet
-            summary.loc[i, 'etof'] = df['etof'].mean()
-            summary.loc[i, 'opnt_cu'] = et_by_year.mean() * df['etof'].mean() - eff_precip - carryover
-            summary.loc[i, 'dnrc_cu'] = bc_cu
-
-        summary.to_sql(out, con, if_exists='append', index=False)
-    else:
-        print('Those fields already have consumptive use data.')
-    print()
-
-
 # Update this one w/ checking.
 def iwr_static_cu_analysis_db(con, shp, gridmet, start, end, etof, out, irrmapper=False):
     """ This only needs to be done once (twice for irrmapper?) whereas the other IWR calcs need
@@ -1037,36 +900,46 @@ def iwr_static_cu_analysis_db(con, shp, gridmet, start, end, etof, out, irrmappe
     print()
 
 
-# I think this works nicely... almost.
-def cu_analysis_db_1(con, shp, gridmet, etof, out, start=1985, end=2024,  irrmapper=False):
+def cu_analysis_db(con, shp, gridmet, etof, out, start=1985, end=2024,
+                   irrmapper=False, mf_timeperiod=2, selection=gpd.GeoDataFrame()):
     """
     Calculate average seasonal consumptive use with both IWR/DNRC and OpenET methods.
 
     :con: sqlite database connection
     :shp: str, name of table in sqlite database associated with field/gridmet lookup
     :gridmet: str, name of table in sqlite database associated with gridmet data
-    :start: str in 'YYYY-MM-DD' format, beginning of period of study
-    :end: str in 'YYYY-MM-DD' format, end of period of study
+    :start: int, year of beginning of period of study
+    :end: int, year after end of period of study
     :etof: str, name of table in sqlite database containing etof data
     :out: str, name of table in sqlite database containing results of consumptive use analysis by field
+    :mf_timeperiod: int, which set of management factors to apply to dnrc_cu calculations, acceptable values of
+    0, 1, or 2 to correspond to the three time periods/set of management factors described in the rule.
     """
+    mf_list = ['1964-1973', '1973-2006', '1997-2006']
+
     print("Calculating consumptive use for fields")
     cur = con.cursor()
 
-    # TODO: add irrmapper to inclusion check
-    # # Checking for inclusion, any new combos of field/year/irrmapper...
+    # # Checking for inclusion, any new combos of field, year, irrmapper, and mf period
     # how to do that? Do I need to add a boolean column?
-    in_fids = cur.execute("SELECT DISTINCT fid FROM {}".format(shp))
+    if selection.empty:
+        in_fids = selection['FID']
+    else:
+        in_fids = cur.execute("SELECT DISTINCT fid FROM {}".format(shp))
+
     field_year_tuples = []
     for i in in_fids:
         for j in range(start, end):
-            field_year_tuples.append((i[0], j))
-    cur.execute("CREATE TEMP TABLE temp1(fid TEXT NOT NULL, year DATE NOT NULL)")  # closed and deleted at end of script
-    cur.executemany("INSERT INTO temp1 VALUES(?, ?)", field_year_tuples)
-    cur.execute("SELECT fid, year FROM temp1 EXCEPT SELECT fid, year FROM {}".format(out))
+            field_year_tuples.append((i[0], j, irrmapper, mf_list[mf_timeperiod]))
+    # temp table is closed and deleted at end of script
+    cur.execute("CREATE TEMP TABLE temp1(fid TEXT NOT NULL, year DATE NOT NULL, im INTEGER NOT NULL, mf_per TEXT NOT NULL)")
+    cur.executemany("INSERT INTO temp1 VALUES(?, ?, ?, ?)", field_year_tuples)
+    cur.execute("SELECT fid, year, im, mf_per FROM temp1 EXCEPT SELECT fid, year, irrmapper, mf_periods FROM {}"
+                .format(out))
     gdf = cur.fetchall()  # ?
 
     if len(gdf) > 0:
+        print("{} new entries".format(len(gdf)))
         fids = []
         ys = []
         etoss = []
@@ -1077,9 +950,14 @@ def cu_analysis_db_1(con, shp, gridmet, etof, out, start=1985, end=2024,  irrmap
         frac_irrs = []
         mf_periods = []
         mfs = []
+        if irrmapper:
+            im = np.ones(len(gdf))
+        else:
+            im = np.zeros(len(gdf))
 
-        dictionary = {k: [] for k, v in gdf}
-        for k, v in gdf:
+        # There are now more than 2 values to unpack...
+        dictionary = {k: [] for k, v, w, x in gdf}
+        for k, v, w, x in gdf:
             dictionary[k].append(v)
         # Is that fast enough? Seems inefficient... At least I have already removed the old stuff.
         # Is the dictionary creation faster than the time saved by not retrieving the row data 39 times?
@@ -1100,14 +978,12 @@ def cu_analysis_db_1(con, shp, gridmet, etof, out, start=1985, end=2024,  irrmap
                 carryover = 2.0
 
             # Get management factor for county that the field is in
-            # TODO: How to determine the closest time period for management factor?
+            # How to determine the closest time period for management factor? No, just don't do that.
             # This is static for now...
             # time periods in 'the rule': 1964–1973 (9), 1973–2006 (33), 1997–2006 (9)
             # HCU, recent HCU, and proposed use
             # Overlay w/ rs data: none (0), 1985-2006 (21), 1997-2023 (26) ?
             # Idea of running averages, por of 38 years of rs data, 1985-1995, 1990-2000, 1995-2005, 2000-2010,
-            mf_timeperiod = 2
-            mf_list = ['1964-1973', '1973-2006', '1997-2006']
             mf = MANAGEMENT_FACTORS[fid[:3]][mf_timeperiod]
 
             for y in yr_values:
@@ -1148,7 +1024,7 @@ def cu_analysis_db_1(con, shp, gridmet, etof, out, start=1985, end=2024,  irrmap
                 df = pd.read_sql("SELECT time, etof FROM {} WHERE fid='{}' AND date(time) BETWEEN date('{}-01-01') "
                                  "AND date('{}-12-31')".format(etof, fid, y, y), con,
                                  index_col='time', parse_dates={'time': '%Y-%m-%d'})
-                r_index = pd.date_range('2016-01-01', '2022-12-31', freq='D')  # avg over all data
+                r_index = pd.date_range('{}-01-01'.format(y), '{}-12-31'.format(y), freq='D')  # avg over all data
                 df = df.reindex(r_index)
                 df = df.interpolate()
                 df['mday'] = ['{}-{}'.format(x.month, x.day) for x in df.index]
@@ -1179,11 +1055,11 @@ def cu_analysis_db_1(con, shp, gridmet, etof, out, start=1985, end=2024,  irrmap
                     dnrc_cus.append(bc_cu)
                     frac_irrs.append(-1)
 
-        merged_data = [(fids[n], ys[n], frac_irrs[n], mf_periods[n], mfs[n], etoss[n], etbcs[n], etofs[n],
+        merged_data = [(fids[n], ys[n], im[n], frac_irrs[n], mf_periods[n], mfs[n], etoss[n], etbcs[n], etofs[n],
                         opnt_cus[n], dnrc_cus[n]) for n in range(len(fids))]
-        cur.executemany("INSERT INTO {} VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)".format(out), merged_data)
+        cur.executemany("INSERT INTO {} VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)".format(out), merged_data)
     else:
-        print('Those fields already have consumptive use data.')
+        print('That consumptive use data is already saved.')
     cur.close()
     print()
 
@@ -1347,7 +1223,7 @@ if __name__ == '__main__':
 
     # # STEP ONE: UPDATE IRRMAPPER DB TABLE
     im_file = os.path.join(main_dir, 'irrmapper_ref_SID.csv')
-    update_irrmapper_table(conec, im_file)
+    # update_irrmapper_table(conec, im_file)
 
     # # STEP TWO: UPDATE ETOF DB TABLE
     etof_loc = os.path.join(main_dir, 'etof_files')  # loads all data
@@ -1358,23 +1234,28 @@ if __name__ == '__main__':
     # gm_d = os.path.join(main_dir, 'gridmet')  # location of general gridmet files
     # gridmet_cent = os.path.join(gm_d, 'gridmet_centroids_MT.shp')
     # rasters_ = os.path.join(gm_d, 'correction_surfaces_aea')  # correction surfaces, one for each month and variable.
-    # # # fields subset
-    # # mt_file = os.path.join(main_dir, "statewide_irrigation_dataset_15FEB2024_5071.shp")
-    # # mt_fields = gpd.read_file(mt_file)  # takes a bit (8.3s)
-    # # mt_fields['county'] = mt_fields['FID'].str.slice(0, 3)
-    # # mt_fields = mt_fields[mt_fields['county'] == '019']
-    # # # print(len(mt_fields))
+    # # fields subset
+    mt_file = os.path.join(main_dir, "statewide_irrigation_dataset_15FEB2024_5071.shp")
+    mt_fields = gpd.read_file(mt_file)  # takes a bit (8.3s)
+    mt_fields['county'] = mt_fields['FID'].str.slice(0, 3)
+    # mt_fields = mt_fields[mt_fields['county'] == '019']
     # # recent dates
     # pos_start = '2016-01-01'
-    # pos_end = '2022-12-31'
-    # # now run db stuff
-    # # gridmet_match_db(conec, mt_fields, gridmet_cent, fields_db)
+    # pos_end = '2023-12-31'
+    # now run db stuff
+    # gridmet_match_db(conec, mt_fields, gridmet_cent, fields_db)
     # corrected_gridmet_db_1(conec, gridmet_cent, fields_db, gm_ts, rasters_, pos_start, pos_end)
-    # cu_analysis_db_1(conec, fields_db, gm_ts, etof_db, results, 2016, 2023)
+    # cu_analysis_db(conec, fields_db, gm_ts, etof_db, results, 2016, 2023, selection=mt_fields)
 
-    # # STEP FOUR: CHECK RESULTS
+    for k in ['011', '025', '109']:
+        COUNTIES.pop(k, None)
+    cntys = list(COUNTIES.keys())
+    for i in cntys:
+        print(i)
+        fields = mt_fields[mt_fields['county'] == i]
+        cu_analysis_db(conec, fields_db, gm_ts, etof_db, results, 1985, 2024, selection=fields)
 
-    # # STEP FIVE: FINISH/CLOSE THINGS
+    # # STEP FOUR: FINISH/CLOSE THINGS
     cursor = conec.cursor()
     cursor.execute("PRAGMA analysis_limit=500")
     cursor.execute("PRAGMA optimize")

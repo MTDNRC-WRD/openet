@@ -232,15 +232,16 @@ def init_db_tables(con):
 
     # This is to help with the old gridmet formatting, since I will not take the time to reload those tables.
     cur.execute("CREATE INDEX IF NOT EXISTS idx1 ON gridmet_ts(gfid, date)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx2 ON field_data(fid)")  # does this do much?
 
     cur.close()
 
 
-def update_irrmapper_table(con):
+def update_irrmapper_table(con, file):
     """ Load local irrmapper csv file (from gee) to db table. """
     cur = con.cursor()
     if len(pd.read_sql("SELECT DISTINCT fid FROM irrmapper", con)) == 0:
-        irrmapper_ref = pd.read_csv('C:/Users/CND571/Downloads/irrmapper_ref_SID.csv', index_col='FID')
+        irrmapper_ref = pd.read_csv(file, index_col='FID')
         irrmapper_ref = irrmapper_ref.drop(columns=['system:index', 'COUNTYNAME', 'COUNTY_NO', 'ITYPE', 'MAPPEDBY',
                                                     'SOURCECODE', 'USAGE', '.geo'])
         data = []
@@ -1330,35 +1331,36 @@ def pd_to_sql_ignore_on_conflict(table, conn, keys, data_iter):
 
 if __name__ == '__main__':
 
-    # # Trying this again with a mini test database, improving sqlite organization/efficiency?
-    # It initializes all right, but is having a hard time checking for inclusion.
+    if os.path.exists('F:/FileShare'):
+        main_dir = 'F:/FileShare/openet_pilot'
+    else:
+        main_dir = 'F:/openet_pilot'
 
     # # STEP ZERO: CREATE DATABASE TABLES
-    # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/tutorial_gm.db")
-    # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/opnt_analysis_02232024.db")  # has additional met data
-    # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/opnt_analysis_02132024.db")  # has 6 counties
-    # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/opnt_analysis_03042024.db")  # has all counties gm match
-    conec = sqlite3.connect("F:/opnt_analysis_03042024_Copy.db")  # has gm data for all counties, do not open in gui!
-    # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/random_05082024.db")
+    conec = sqlite3.connect(os.path.join(main_dir, "opnt_analysis_03042024_Copy.db"))
+    # has gm data for all counties, do not open table in gui!
+    # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/random_05082024.db")  # test
     # sqlite database table names
     gm_ts, fields_db, results, etof_db, irr_db = 'gridmet_ts', 'field_data', 'field_cu_results', 'opnt_etof', 'irrmapper'
     # Initialize tables with correct column names/types/primary keys
     init_db_tables(conec)
 
     # # STEP ONE: UPDATE IRRMAPPER DB TABLE
-    update_irrmapper_table(conec)
+    im_file = os.path.join(main_dir, 'irrmapper_ref_SID.csv')
+    update_irrmapper_table(conec, im_file)
 
     # # STEP TWO: UPDATE ETOF DB TABLE
-    etof_loc = "C:/Users/CND571/Documents/Data/etof_files/old"  # loads all data
-    update_etof_db_1(conec, etof_loc, etof_db)
+    etof_loc = os.path.join(main_dir, 'etof_files')  # loads all data
+    # update_etof_db_1(conec, etof_loc, etof_db)
 
     # # # STEP THREE: RUN OTHER 3 TABLES TO GET RESULTS
     # # gridmet information
-    # gm_d = 'F:/openet_pilot/gridmet'  # location of general gridmet files
+    # gm_d = os.path.join(main_dir, 'gridmet')  # location of general gridmet files
     # gridmet_cent = os.path.join(gm_d, 'gridmet_centroids_MT.shp')
     # rasters_ = os.path.join(gm_d, 'correction_surfaces_aea')  # correction surfaces, one for each month and variable.
     # # # fields subset
-    # # mt_fields = gpd.read_file("F:/openet_pilot/statewide_irrigation_dataset_15FEB2024_5071.shp")  # takes a bit (8.3s)
+    # # mt_file = os.path.join(main_dir, "statewide_irrigation_dataset_15FEB2024_5071.shp")
+    # # mt_fields = gpd.read_file(mt_file)  # takes a bit (8.3s)
     # # mt_fields['county'] = mt_fields['FID'].str.slice(0, 3)
     # # mt_fields = mt_fields[mt_fields['county'] == '019']
     # # # print(len(mt_fields))

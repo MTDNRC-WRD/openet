@@ -922,21 +922,25 @@ def cu_analysis_db(con, shp, gridmet, etof, out, start=1985, end=2024,
 
     # # Checking for inclusion, any new combos of field, year, irrmapper, and mf period
     # how to do that? Do I need to add a boolean column?
-    if selection.empty:
-        in_fids = selection['FID']
-    else:
-        in_fids = cur.execute("SELECT DISTINCT fid FROM {}".format(shp))
 
     field_year_tuples = []
-    for i in in_fids:
-        for j in range(start, end):
-            field_year_tuples.append((i[0], j, irrmapper, mf_list[mf_timeperiod]))
+    if selection.empty:
+        in_fids = cur.execute("SELECT DISTINCT fid FROM {}".format(shp))
+        for i in in_fids:
+            for j in range(start, end):
+                field_year_tuples.append((i[0], j, irrmapper, mf_list[mf_timeperiod]))
+    else:
+        in_fids = selection['FID']
+        for i in in_fids:
+            for j in range(start, end):
+                field_year_tuples.append((i, j, irrmapper, mf_list[mf_timeperiod]))
+
     # temp table is closed and deleted at end of script
+    cur.execute("DROP TABLE IF EXISTS temp.temp1")
     cur.execute("CREATE TEMP TABLE temp1(fid TEXT NOT NULL, year DATE NOT NULL, im INTEGER NOT NULL, mf_per TEXT NOT NULL)")
     cur.executemany("INSERT INTO temp1 VALUES(?, ?, ?, ?)", field_year_tuples)
-    cur.execute("SELECT fid, year, im, mf_per FROM temp1 EXCEPT SELECT fid, year, irrmapper, mf_periods FROM {}"
-                .format(out))
-    gdf = cur.fetchall()  # ?
+    cur.execute("SELECT * FROM temp1 EXCEPT SELECT fid, year, irrmapper, mf_periods FROM {}".format(out))
+    gdf = cur.fetchall()
 
     if len(gdf) > 0:
         print("{} new entries".format(len(gdf)))
@@ -1250,10 +1254,10 @@ if __name__ == '__main__':
     for k in ['011', '025', '109']:
         COUNTIES.pop(k, None)
     cntys = list(COUNTIES.keys())
-    for i in cntys:
+    for i in cntys[1:]:  # '001' complete
         print(i)
         fields = mt_fields[mt_fields['county'] == i]
-        cu_analysis_db(conec, fields_db, gm_ts, etof_db, results, 1985, 2024, selection=fields)
+        cu_analysis_db(conec, fields_db, gm_ts, etof_db, results, 1987, 2024, selection=fields)
 
     # # STEP FOUR: FINISH/CLOSE THINGS
     cursor = conec.cursor()

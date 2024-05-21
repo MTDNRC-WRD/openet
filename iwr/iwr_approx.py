@@ -28,8 +28,11 @@ alfalfa_kc = [0.6, 0.63, 0.68, 0.73, 0.79, 0.86, 0.92, 0.98, 1.04, 1.08, 1.12, 1
 def effective_ppt_table():
     """Load effective precip table from file."""
     # NEH 2-148, table 2-43
-    d = 'C:/Users/CND571/Documents/Data'
-    _file = os.path.join(d, 'eff_precip_neh_chap2.csv')
+    if os.path.exists('F:/FileShare'):
+        main_dir = 'F:/FileShare/openet_pilot'
+    else:
+        main_dir = 'F:/openet_pilot'
+    _file = os.path.join(main_dir, 'eff_precip_neh_chap2.csv')
     return pd.read_csv(_file, index_col=0)
 
 
@@ -440,11 +443,9 @@ def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', sea
     df['ref_u'] = df['kt'] * df['f']  # no crop coefficient or elevation correction.
     df['u'] = df['k'] * df['f']  # monthly consumptive use, inches, "total monthly ET" in IWR.
 
-    # Effective precipitation calculations
-    # From NEH Ch2 Table 2-43
-    table_ep = effective_ppt_table()
+    # Effective precipitation calculations (From NEH Ch2)
 
-    # Keys are water storage depth in inches.
+    # Keys are water storage depth in inches. Dict replaces eq. 2-85.
     wsd = None
     if wsd:
         factors = {0.75: 0.72, 1.0: 0.77, 1.5: 0.86, 2.0: 0.93, 2.5: 0.97, 3.0: 1.00,
@@ -454,7 +455,7 @@ def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', sea
     else:  # assume default wsd of 3 in.
         factor = 1.0
 
-    # Get monthly ET and precip, rounding for table lookup below
+    # Get monthly ET and precip
     et = df['u'].to_list()
     pm = df['rain']
 
@@ -487,12 +488,14 @@ def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', sea
     pmr = (round(pm * 2) / 2)
 
     ep = []
+    # table lookup replaced by eq. 2-84 to avoid limits on max ET. rounded inputs kept to match table. (and IWR?)
     for i in range(len(df)):
-        epi = factor * table_ep[str(int(et[i]))][pmr.iloc[i]]
+        epi = factor * ((0.70917 * pmr.iloc[i]**0.82416) - 0.11556) * (10**(0.02426*int(et[i])))
+        epi = np.round(epi, 2)
         if epi < et[i] and epi < pmr.iloc[i]:
             ep.append(epi)
         else:
-            ep.append(min(et[i],pm.iloc[i]))
+            ep.append(min(et[i], pm.iloc[i]))
     df['ep'] = ep
 
     # Net irrigation requirements (almost "consumptive use", just needs management factor)

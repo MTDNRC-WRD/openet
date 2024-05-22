@@ -93,8 +93,8 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
 
     if fullmonth:
         # something a little weird with start dates/first period... non-inclusive of last day of month?
-        season_start = pd.to_datetime('2000-05-01')  # ex: 4-30 vs 5-01 doesn't change result.
-        season_end = pd.to_datetime('2000-10-01')
+        season_start = pd.to_datetime('2000-04-01')  # ex: 4-30 vs 5-01 doesn't change result.
+        season_end = pd.to_datetime('2000-09-30')
 
     season_length = (season_end - season_start).days
 
@@ -215,11 +215,9 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
     df['ref_u'] = df['kt'] * df['f']  # no crop coefficient or elevation correction.
     df['u'] = df['k'] * df['f']  # monthly consumptive use, inches, "total monthly ET" in IWR.
 
-    # Effective precipitation calculations
-    # From NEH Ch2 Table 2-43
-    table_ep = effective_ppt_table()
+    # Effective precipitation calculations (From NEH Ch2)
 
-    # Keys are water storage depth in inches.
+    # Keys are water storage depth in inches. Dict replaces eq. 2-85.
     wsd = None
     if wsd:
         factors = {0.75: 0.72, 1.0: 0.77, 1.5: 0.86, 2.0: 0.93, 2.5: 0.97, 3.0: 1.00,
@@ -233,7 +231,7 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
     # then multiply by the month fraction again to get effective precip.
     # Assumed to be after the values are interpolated for partial months.
 
-    # Get monthly ET and precip, rounding for table lookup below
+    # Get monthly ET and precip
     et = df['u'].to_list()
     pm = df['rain']
     # correct the first and last periods to be full month estimates.
@@ -279,8 +277,10 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
     pmr = (round(pm * 2) / 2)
 
     ep = []
+    # table lookup replaced by eq. 2-84 to avoid limits on max ET. rounded inputs kept to match table. (and IWR?)
     for i in range(len(df)):
-        epi = factor * table_ep[str(int(et[i]))][pmr.iloc[i]]
+        epi = factor * ((0.70917 * pmr.iloc[i] ** 0.82416) - 0.11556) * (10 ** (0.02426 * int(et[i])))
+        epi = np.round(epi, 2)
         if epi < et[i] and epi < pmr.iloc[i]:
             ep.append(epi)
         else:
@@ -710,11 +710,9 @@ def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=Non
     df['ref_u'] = df['kt'] * df['f']  # no crop coefficient or elevation correction.
     df['u'] = df['k'] * df['f']  # monthly consumptive use, inches, "total monthly ET" in IWR.
 
-    # Effective precipitation calculations
-    # From NEH Ch2 Table 2-43
-    table_ep = effective_ppt_table()
+    # Effective precipitation calculations (From NEH Ch2)
 
-    # Keys are water storage depth in inches.
+    # Keys are water storage depth in inches. Dict replaces eq. 2-85.
     wsd = None
     if wsd:
         factors = {0.75: 0.72, 1.0: 0.77, 1.5: 0.86, 2.0: 0.93, 2.5: 0.97, 3.0: 1.00,
@@ -728,7 +726,7 @@ def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=Non
     # then multiply by the month fraction again to get effective precip.
     # Assumed to be after the values are interpolated for partial months.
 
-    # Get monthly ET and precip, rounding for table lookup below
+    # Get monthly ET and precip
     et = df['u'].to_list()
     pm = df['rain']
     # correct the first and last periods to be full month estimates.
@@ -774,12 +772,14 @@ def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=Non
     pmr = (round(pm * 2) / 2)
 
     ep = []
+    # table lookup replaced by eq. 2-84 to avoid limits on max ET. rounded inputs kept to match table. (and IWR?)
     for i in range(len(df)):
-        epi = factor * table_ep[str(int(et[i]))][pmr.iloc[i]]
+        epi = factor * ((0.70917 * pmr.iloc[i] ** 0.82416) - 0.11556) * (10 ** (0.02426 * int(et[i])))
+        epi = np.round(epi, 2)
         if epi < et[i] and epi < pmr.iloc[i]:
             ep.append(epi)
         else:
-            ep.append(min(et[i],pm.iloc[i]))
+            ep.append(min(et[i], pm.iloc[i]))
 
     # Get first and last months back into fractions.
     ep[0] = ep[0] * month_fraction1
@@ -1022,10 +1022,10 @@ if __name__ == '__main__':
     # time period to use for daily data, if different one needed
     # pos_start, pos_end = '1971-01-01', '2000-12-31'  # default, period used in IWR
 
-    run_one_iwr_station('2409', data_dir=daily_data_dir)
+    # run_one_iwr_station('2409', data_dir=daily_data_dir)
 
-    # run_all_iwr_stations(iwr_clim_db_loc, iwr_sum, daily_data_dir)
+    run_all_iwr_stations(iwr_clim_db_loc, iwr_sum, daily_data_dir)
 
-    plot_growing_season_starts_and_ends(iwr_clim_db_loc)
+    # plot_growing_season_starts_and_ends(iwr_clim_db_loc)
 
 # ========================= EOF ====================================================================

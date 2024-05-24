@@ -952,7 +952,7 @@ def cu_analysis_db(con, shp, gridmet, etof, out, start=1985, end=2024,
     print()
 
 
-def iwr_static_cu_analysis_db(con, shp, out, clim_db_loc, mf_timeperiod=2, selection=gpd.GeoDataFrame()):
+def iwr_static_cu_analysis_db(con, shp, out, clim_db_loc, mf_timeperiod=2, selection=gpd.GeoDataFrame(), iwr_coord=""):
     """
     Calculate average seasonal consumptive use with IWR climate database files.
 
@@ -988,6 +988,7 @@ def iwr_static_cu_analysis_db(con, shp, out, clim_db_loc, mf_timeperiod=2, selec
     cur.executemany("INSERT INTO temp2 VALUES(?, ?)", field_year_tuples)
     cur.execute("SELECT * FROM temp2 EXCEPT SELECT fid, mf_periods FROM {}".format(out))
     gdf = cur.fetchall()
+    # gdf = gdf[:int(len(gdf)/2)]  # to get some stuff loaded before it breaks (memory access error on larger chunks?)
 
     if len(gdf) > 0:
         print("{} new entries".format(len(gdf)))
@@ -997,7 +998,10 @@ def iwr_static_cu_analysis_db(con, shp, out, clim_db_loc, mf_timeperiod=2, selec
         mf_periods = []
         mfs = []
 
-        iwr_stations = iwr_station_data()
+        if len(iwr_coord) > 0:
+            iwr_stations = iwr_station_data(iwr_coord)
+        else:
+            iwr_stations = iwr_station_data()
 
         for item in tqdm(gdf, total=len(gdf)):
             fid = item[0]
@@ -1128,19 +1132,20 @@ if __name__ == '__main__':
     pos_end = '2023-12-31'
     # location of IWR climate database
     iwr_clim_loc = os.path.join(main_dir, 'IWR', 'climate.db')
+    iwr_coord_loc = os.path.join(main_dir, 'IWR', 'iwr_stations.geojson')
     # iwr_clim_loc = 'C:/Users/CND571/Documents/IWR/Database/climate.db'
 
-    # # Load Statewide Irrigation Dataset (about 10 seconds)
-    # mt_file = os.path.join(main_dir, "statewide_irrigation_dataset_15FEB2024_5071.shp")
-    # mt_fields = gpd.read_file(mt_file)  # takes a bit (8.3s)
-    # mt_fields['county'] = mt_fields['FID'].str.slice(0, 3)
-    # # remove tiny fields, no etof data for them.
-    # mt_fields['area_m2'] = mt_fields['geometry'].area
-    # tiny_fields = mt_fields[mt_fields['area_m2'] < 100].index
-    # clean_sid = mt_fields.drop(tiny_fields)
-    # mt_fields = clean_sid.drop(columns=['area_m2'])
-    # # optional county subset
-    # # mt_fields = mt_fields[mt_fields['county'] == '019']
+    # Load Statewide Irrigation Dataset (about 10 seconds)
+    mt_file = os.path.join(main_dir, "statewide_irrigation_dataset_15FEB2024_5071.shp")
+    mt_fields = gpd.read_file(mt_file)  # takes a bit (8.3s)
+    mt_fields['county'] = mt_fields['FID'].str.slice(0, 3)
+    # remove tiny fields, no etof data for them.
+    mt_fields['area_m2'] = mt_fields['geometry'].area
+    tiny_fields = mt_fields[mt_fields['area_m2'] < 100].index
+    clean_sid = mt_fields.drop(tiny_fields)
+    mt_fields = clean_sid.drop(columns=['area_m2'])
+    # optional county subset
+    # mt_fields = mt_fields[mt_fields['county'] == '019']
 
     # # Database stuff
     # # --------------
@@ -1164,16 +1169,16 @@ if __name__ == '__main__':
     # corrected_gridmet_db_1(conec, gridmet_cent, fields_db, gm_ts, rasters_, pos_start, pos_end)
 
     # Populate consumptive use result db table (about 30 hours?)
-    # for k in ['011', '025', '109']:
-    #     COUNTIES.pop(k, None)
-    # cntys = list(COUNTIES.keys())
-    # for i in cntys:
-    #     print(i)
-    #     fields = mt_fields[mt_fields['county'] == i]
-    #     cu_analysis_db(conec, fields_db, gm_ts, etof_db, results, 1987, 2024, selection=fields)
+    for k in ['011', '025', '101', '109']:  # issue w/ 101 etof data
+        COUNTIES.pop(k, None)
+    cntys = list(COUNTIES.keys())
+    for i in cntys:
+        print(i)
+        fields = mt_fields[mt_fields['county'] == i]
+        cu_analysis_db(conec, fields_db, gm_ts, etof_db, results, 1987, 2024, selection=fields)
 
-    # Populate IWR static climate consumptive use result db table (about an hour?)
-    iwr_static_cu_analysis_db(conec, fields_db, iwr_cu_db, iwr_clim_loc)
+    # # Populate IWR static climate consumptive use result db table (about 30 mins?)
+    # iwr_static_cu_analysis_db(conec, fields_db, iwr_cu_db, iwr_clim_loc, iwr_coord=iwr_coord_loc)
 
     # # SCRATCH WORK
 

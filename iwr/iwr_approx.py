@@ -320,6 +320,7 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
             df['cu'].iloc[-i] = 0
             i += 1
 
+    table.close()
     return df, season_start, season_end
 
 

@@ -62,7 +62,7 @@ def openet_get_fields_export(fields, start, end, et_too=False,
         url="https://openet-api-montana-ic5gyecbva-uw.a.run.app/raster/export/multipolygon"
     )
     print(resp.json())
-    response = resp.json()
+    # response = resp.json()
     # tag = response['name']
     # print(tag)
 
@@ -251,14 +251,15 @@ def check_etof_data(counties, etof_dir, plot=False):
                         plt.axvspan(dt.date(j, 4, 1), dt.date(j, 10, 1), alpha=0.15, zorder=0)
 
                 # Quick distribution of etof values in this county's fields over time.
-                plt.scatter(etof_data['time'], etof_data['etof'], c='k', alpha=8/len(fields), edgecolors='none', zorder=2)
+                plt.scatter(etof_data['time'], etof_data['etof'],
+                            c='k', alpha=8/len(fields), edgecolors='none', zorder=2)
 
                 # # Plotting individual field time series.
                 # for j in fields[:10]:
                 #     etof_field = etof_data[etof_data['FID'] == j]
                 #     plt.plot(etof_field['time'], etof_field['etof'], label=j[-3:], zorder=3)
 
-                # Plotting missing/additional data, lines get bolder with additional fields missing months on the same date.
+                # Plotting missing/additional data, lines get bolder with more fields missing months on the same date.
                 first_m = 0
                 for k, v in missing.items():
                     if first_m == 0:
@@ -267,7 +268,6 @@ def check_etof_data(counties, etof_dir, plot=False):
                         first_m = 1
                     else:
                         plt.vlines(v, 0, 1.2, alpha=0.1, color='tab:orange')
-                first_t = 0
 
                 # mean growing season vs winter etof
                 plt.hlines(ygs, dt.date(1985, 1, 1), dt.date(2024, 1, 1),
@@ -375,7 +375,6 @@ def check_etof_data_concat(counties, etof_dir, plot=False):
                     first_m = 1
                 else:
                     plt.vlines(v, 0, 1.2, alpha=0.1, color='tab:orange')
-            first_t = 0
 
             # mean growing season vs winter etof
             plt.hlines(ygs, dt.date(1985, 1, 1), dt.date(2024, 1, 1),
@@ -398,22 +397,18 @@ def check_etof_data_concat(counties, etof_dir, plot=False):
 
 
 if __name__ == '__main__':
-    # STEP 1: Get the data from Openet to Google Drive
+    # STEP 1: Get the data from Openet to Google Drive (about 36 hours?)
     # get_all_openet_etof_data()
 
     # STEP 2: Download files manually to path specified below, rename files to something useful.
     path_ = 'C:/Users/CND571/Documents/Data/etof_files/old-copy'  # old-copy has concat files, old has separate.
     # rename_etof_downloads(path_)  # Breaks when all files have been renamed already.
 
-    # # OPTIONAL: STEP 2.5: combine files by county.
-    # concat_etof(path_)
-
-    # STEP 3: Data quality checks
-    for k in ['011', '025', '109']:
-        COUNTIES.pop(k, None)
-    # cnty = list(COUNTIES.keys())
-    cnty = ['049', '067', '097']
-    # This takes about 30 minutes to run for all counties.
-    # check_etof_data(cnty, path_, False)
+    # STEP 3: Data quality checks (about 30 mins)
+    # concat_etof(path_)  # run in duplicate directory
+    for key in ['011', '025', '109']:
+        COUNTIES.pop(key, None)
+    cnty = list(COUNTIES.keys())
+    # cnty = ['049', '067', '097']  # subset
     check_etof_data_concat(cnty, path_, True)
 # ========================= EOF ====================================================================

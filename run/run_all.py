@@ -784,103 +784,6 @@ def more_gridmet_vars(con, variables, gridmet_points, fields_join, gridmet_tb, g
     cur.close()
 
 
-def iwr_static_cu_analysis_db(con, shp, out, clim_db_loc, mf_timeperiod=2, selection=gpd.GeoDataFrame()):
-    """
-    Calculate average seasonal consumptive use with IWR climate database files.
-
-    :con: sqlite database connection
-    :shp: str, name of table in sqlite database associated with field/gridmet lookup
-    :gridmet: str, name of table in sqlite database associated with gridmet data
-    :start: int, year of beginning of period of study
-    :end: int, year after end of period of study
-    :etof: str, name of table in sqlite database containing etof data
-    :out: str, name of table in sqlite database containing results of consumptive use analysis by field
-    :mf_timeperiod: int, which set of management factors to apply to dnrc_cu calculations, acceptable values of
-    0, 1, or 2 to correspond to the three time periods/set of management factors described in the rule.
-    """
-    mf_list = ['1964-1973', '1973-2006', '1997-2006']
-
-    print("Calculating consumptive use for fields")
-    cur = con.cursor()
-
-    # Checking for inclusion, any new combos of field, irrmapper, and mf period
-    field_year_tuples = []
-    if selection.empty:
-        in_fids = cur.execute("SELECT DISTINCT fid FROM {}".format(shp))
-        for i in in_fids:
-            field_year_tuples.append((i[0], mf_list[mf_timeperiod]))
-    else:
-        in_fids = selection['FID']
-        for i in in_fids:
-            field_year_tuples.append((i, mf_list[mf_timeperiod]))
-
-    # temp table is closed and deleted at end of script
-    cur.execute("DROP TABLE IF EXISTS temp.temp2")
-    cur.execute("CREATE TEMP TABLE temp2(fid TEXT NOT NULL, mf_per TEXT NOT NULL)")
-    cur.executemany("INSERT INTO temp2 VALUES(?, ?)", field_year_tuples)
-    cur.execute("SELECT * FROM temp2 EXCEPT SELECT fid, mf_periods FROM {}".format(out))
-    gdf = cur.fetchall()
-
-    if len(gdf) > 0:
-        print("{} new entries".format(len(gdf)))
-        fids = []
-        etbcs = []
-        dnrc_cus = []
-        mf_periods = []
-        mfs = []
-
-        iwr_stations = iwr_station_data()
-
-        for item in tqdm(gdf, total=len(gdf)):
-            fid = item[0]
-            # Do all time-independent stuff first
-            row = cur.execute("SELECT * FROM {} WHERE fid=?".format(shp), (fid,)).fetchone()
-
-            if row[1] == 'P':  # Corresponds to 'itype'
-                pivot = True
-                carryover = 0.5
-            else:
-                pivot = False
-                carryover = 2.0
-
-            # Get management factor for county that the field is in
-            # How to determine the closest time period for management factor? No, just don't do that.
-            # This is static for now...
-            # time periods in 'the rule': 1964–1973 (9), 1973–2006 (33), 1997–2006 (9)
-            # HCU, recent HCU, and proposed use
-            # Overlay w/ rs data: none (0), 1985-2006 (21), 1997-2023 (26) ?
-            # Idea of running averages, por of 38 years of rs data, 1985-1995, 1990-2000, 1995-2005, 2000-2010,
-            mf = MANAGEMENT_FACTORS[fid[:3]][mf_timeperiod]
-
-            mf_periods.append(mf_list[mf_timeperiod])
-            mfs.append(mf)
-            fids.append(fid)
-
-            station = closest_iwr_station(row, iwr_stations)
-
-            # Calculating bc seasonal ET
-            bc, start1, end1 = iwr_database(clim_db_loc, station, fullmonth=True, pivot=pivot)
-
-            bc_cu = mf * bc['cu'].sum()  # add management factor
-            bc_pet = bc['u'].sum()
-
-            # Explanation of consumptive use calculations
-            # IWR: sum of monthly ET minus effective precip minus carryover, all times management factor
-            # sum(u_month - ep_month - co_month) * mf
-            # OpenET: average seasonal ET times crop coefficient minus effective precip and carryover
-            # (ETo * ETof) - ep - co
-
-            etbcs.append(bc_pet)
-            dnrc_cus.append(bc_cu)
-
-        merged_data = [(fids[n], mf_periods[n], mfs[n], etbcs[n], dnrc_cus[n]) for n in range(len(fids))]
-        cur.executemany("INSERT INTO {} VALUES(?, ?, ?, ?, ?)".format(out), merged_data)
-    else:
-        print('That consumptive use data is already saved.')
-    cur.close()
-    print()
-
-
 def cu_analysis_db(con, shp, gridmet, etof, out, start=1985, end=2024,
                    irrmapper=False, mf_timeperiod=2, selection=gpd.GeoDataFrame()):
     """
@@ -1042,6 +945,102 @@ def cu_analysis_db(con, shp, gridmet, etof, out, start=1985, end=2024,
         merged_data = [(fids[n], ys[n], im[n], frac_irrs[n], mf_periods[n], mfs[n], etoss[n], etbcs[n], etofs[n],
                         opnt_cus[n], dnrc_cus[n]) for n in range(len(fids))]
         cur.executemany("INSERT INTO {} VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)".format(out), merged_data)
+        con.commit()
+    else:
+        print('That consumptive use data is already saved.')
+    cur.close()
+    print()
+
+
+def iwr_static_cu_analysis_db(con, shp, out, clim_db_loc, mf_timeperiod=2, selection=gpd.GeoDataFrame()):
+    """
+    Calculate average seasonal consumptive use with IWR climate database files.
+
+    :con: sqlite database connection
+    :shp: str, name of table in sqlite database associated with field/gridmet lookup
+    :gridmet: str, name of table in sqlite database associated with gridmet data
+    :start: int, year of beginning of period of study
+    :end: int, year after end of period of study
+    :etof: str, name of table in sqlite database containing etof data
+    :out: str, name of table in sqlite database containing results of consumptive use analysis by field
+    :mf_timeperiod: int, which set of management factors to apply to dnrc_cu calculations, acceptable values of
+    0, 1, or 2 to correspond to the three time periods/set of management factors described in the rule.
+    """
+    mf_list = ['1964-1973', '1973-2006', '1997-2006']
+
+    print("Calculating consumptive use for fields")
+    cur = con.cursor()
+
+    # Checking for inclusion, any new combos of field, irrmapper, and mf period
+    field_year_tuples = []
+    if selection.empty:
+        in_fids = cur.execute("SELECT DISTINCT fid FROM {}".format(shp))
+        for i in in_fids:
+            field_year_tuples.append((i[0], mf_list[mf_timeperiod]))
+    else:
+        in_fids = selection['FID']
+        for i in in_fids:
+            field_year_tuples.append((i, mf_list[mf_timeperiod]))
+
+    # temp table is closed and deleted at end of script
+    cur.execute("DROP TABLE IF EXISTS temp.temp2")
+    cur.execute("CREATE TEMP TABLE temp2(fid TEXT NOT NULL, mf_per TEXT NOT NULL)")
+    cur.executemany("INSERT INTO temp2 VALUES(?, ?)", field_year_tuples)
+    cur.execute("SELECT * FROM temp2 EXCEPT SELECT fid, mf_periods FROM {}".format(out))
+    gdf = cur.fetchall()
+
+    if len(gdf) > 0:
+        print("{} new entries".format(len(gdf)))
+        fids = []
+        etbcs = []
+        dnrc_cus = []
+        mf_periods = []
+        mfs = []
+
+        iwr_stations = iwr_station_data()
+
+        for item in tqdm(gdf, total=len(gdf)):
+            fid = item[0]
+            # Do all time-independent stuff first
+            row = cur.execute("SELECT * FROM {} WHERE fid=?".format(shp), (fid,)).fetchone()
+
+            if row[1] == 'P':  # Corresponds to 'itype'
+                pivot = True
+            else:
+                pivot = False
+
+            # Get management factor for county that the field is in
+            # How to determine the closest time period for management factor? No, just don't do that.
+            # This is static for now...
+            # time periods in 'the rule': 1964–1973 (9), 1973–2006 (33), 1997–2006 (9)
+            # HCU, recent HCU, and proposed use
+            # Overlay w/ rs data: none (0), 1985-2006 (21), 1997-2023 (26) ?
+            # Idea of running averages, por of 38 years of rs data, 1985-1995, 1990-2000, 1995-2005, 2000-2010,
+            mf = MANAGEMENT_FACTORS[fid[:3]][mf_timeperiod]
+
+            mf_periods.append(mf_list[mf_timeperiod])
+            mfs.append(mf)
+            fids.append(fid)
+
+            station = closest_iwr_station(row, iwr_stations)
+
+            # Calculating bc seasonal ET
+            bc, start1, end1 = iwr_database(clim_db_loc, station, fullmonth=True, pivot=pivot)
+
+            bc_cu = mf * bc['cu'].sum()  # add management factor
+            bc_pet = bc['u'].sum()
+
+            # Explanation of consumptive use calculations
+            # IWR: sum of monthly ET minus effective precip minus carryover, all times management factor
+            # sum(u_month - ep_month - co_month) * mf
+            # OpenET: average seasonal ET times crop coefficient minus effective precip and carryover
+            # (ETo * ETof) - ep - co
+
+            etbcs.append(bc_pet)
+            dnrc_cus.append(bc_cu)
+
+        merged_data = [(fids[n], mf_periods[n], mfs[n], etbcs[n], dnrc_cus[n]) for n in range(len(fids))]
+        cur.executemany("INSERT INTO {} VALUES(?, ?, ?, ?, ?)".format(out), merged_data)
     else:
         print('That consumptive use data is already saved.')
     cur.close()
@@ -1113,7 +1112,7 @@ if __name__ == '__main__':
         main_dir = 'F:/openet_pilot'
 
     # # Required Filepaths/Variable Names
-    # sqlite database table names
+    # sqlite database table names (Do these really need to be passed as variables?)
     gm_ts, fields_db, results, etof_db = 'gridmet_ts', 'field_data', 'field_cu_results', 'opnt_etof'
     irr_db, iwr_cu_db = 'irrmapper', 'static_iwr_results'
     # irrmapper data
@@ -1128,25 +1127,26 @@ if __name__ == '__main__':
     pos_start = '1987-01-01'
     pos_end = '2023-12-31'
     # location of IWR climate database
-    iwr_clim_loc = 'C:/Users/CND571/Documents/IWR/Database/climate.db'
+    iwr_clim_loc = os.path.join(main_dir, 'IWR', 'climate.db')
+    # iwr_clim_loc = 'C:/Users/CND571/Documents/IWR/Database/climate.db'
 
     # # Load Statewide Irrigation Dataset (about 10 seconds)
-    mt_file = os.path.join(main_dir, "statewide_irrigation_dataset_15FEB2024_5071.shp")
-    mt_fields = gpd.read_file(mt_file)  # takes a bit (8.3s)
-    mt_fields['county'] = mt_fields['FID'].str.slice(0, 3)
-    # remove tiny fields, no etof data for them.
-    mt_fields['area_m2'] = mt_fields['geometry'].area
-    tiny_fields = mt_fields[mt_fields['area_m2'] < 100].index
-    clean_sid = mt_fields.drop(tiny_fields)
-    mt_fields = clean_sid.drop(columns=['area_m2'])
-    # optional county subset
-    # mt_fields = mt_fields[mt_fields['county'] == '019']
+    # mt_file = os.path.join(main_dir, "statewide_irrigation_dataset_15FEB2024_5071.shp")
+    # mt_fields = gpd.read_file(mt_file)  # takes a bit (8.3s)
+    # mt_fields['county'] = mt_fields['FID'].str.slice(0, 3)
+    # # remove tiny fields, no etof data for them.
+    # mt_fields['area_m2'] = mt_fields['geometry'].area
+    # tiny_fields = mt_fields[mt_fields['area_m2'] < 100].index
+    # clean_sid = mt_fields.drop(tiny_fields)
+    # mt_fields = clean_sid.drop(columns=['area_m2'])
+    # # optional county subset
+    # # mt_fields = mt_fields[mt_fields['county'] == '019']
 
     # # Database stuff
     # # --------------
 
-    # conec = sqlite3.connect(os.path.join(main_dir, "opnt_analysis_03042024_Copy.db"))  # full project
-    conec = sqlite3.connect("C:/Users/CND571/Documents/Data/random_05082024.db")  # test
+    conec = sqlite3.connect(os.path.join(main_dir, "opnt_analysis_03042024_Copy.db"))  # full project
+    # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/random_05082024.db")  # test
 
     # # Initialize tables with correct column names/types/primary keys
     # init_db_tables(conec)
@@ -1173,7 +1173,7 @@ if __name__ == '__main__':
     #     cu_analysis_db(conec, fields_db, gm_ts, etof_db, results, 1987, 2024, selection=fields)
 
     # Populate IWR static climate consumptive use result db table (about an hour?)
-    # iwr_static_cu_analysis_db(conec, fields_db, iwr_cu_db, iwr_clim_loc)
+    iwr_static_cu_analysis_db(conec, fields_db, iwr_cu_db, iwr_clim_loc)
 
     # # SCRATCH WORK
 

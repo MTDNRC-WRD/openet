@@ -4,6 +4,7 @@ import os
 import pandas as pd
 import sqlite3
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 from run_all import COUNTIES
 
@@ -31,6 +32,28 @@ def sum_data(con, start=1987, end=2023, irrmapper=0, mf_periods='1997-2006', sta
             data.to_csv(os.path.join(save, "cu_results_{}_{}_im{}_mf{}.csv".format(start, end, irrmapper, mf_periods)))
         else:
             return data
+
+
+def time_series_data(con, save_dir):
+    the_index = pd.MultiIndex.from_product([COUNTIES.keys(), range(1987, 2018, 3)], names=["county", "st_year"])
+    mov_avg = pd.DataFrame(index=the_index, columns=['etos', 'etbc', 'opnt_cu', 'dnrc_cu', 'frac_irr'])
+    # for i in range(1987, 2018, 3):
+    for i in tqdm(range(1987, 2018, 3), total=11):
+        decade = sum_data(con, start=i, end=i+6)
+        grouped = decade.groupby('county').mean()
+
+        im = sum_data(con, start=i, end=i+6, irrmapper=1)
+        im_grouped = im.groupby('county').mean()
+
+        for j in COUNTIES.keys():
+            mov_avg.at[(j, i), 'etos'] = grouped[grouped.index == j]['etos'].iloc[0]
+            mov_avg.at[(j, i), 'etbc'] = grouped[grouped.index == j]['etbc'].iloc[0]
+            mov_avg.at[(j, i), 'opnt_cu'] = grouped[grouped.index == j]['opnt_cu'].iloc[0]
+            mov_avg.at[(j, i), 'dnrc_cu'] = grouped[grouped.index == j]['dnrc_cu'].iloc[0]
+            mov_avg.at[(j, i), 'frac_irr'] = im_grouped[im_grouped.index == j]['frac_irr'].iloc[0]
+
+    # print(mov_avg)
+    mov_avg.to_csv(os.path.join(save_dir, "ts_6yrs_im0_mf1997-2006.csv"))
 
 
 def gridmet_ct(con, pront=False):
@@ -630,15 +653,24 @@ def plot_results_3(data, iwr):
     plt.tight_layout()
 
 
-def time_series(iwr, con, var):
-    # print(len(range(1987, 2018, 3)))
-    # iterables = [["bar", "baz", "foo", "qux"], ["one", "two"]]
+def time_series_plot(ts_data, iwr, var):
+    static_avg = iwr.groupby('county').mean()
 
-    the_index = pd.MultiIndex.from_product([COUNTIES.keys(), range(1987, 2018, 3)], names=["county", "st_year"])
-    mov_avg = pd.DataFrame(index=the_index, columns=[''])
-    for i in range(1987, 2018, 3):
-        decade = sum_data(con, start=i, end=i+6)
-        print(i, i+6)
+    plt.figure()
+    for i in COUNTIES.keys():
+        plt.plot(ts_data[ts_data['county'] == i]['st_year'] + 3, ts_data[ts_data['county'] == i][var],
+                 alpha=0.3)
+        if i == '001':
+            plt.hlines(static_avg[static_avg.index == i][var], 1987, 2003,
+                       color='k', linestyle='dashed', alpha=0.2, label='DNRC (climate)')
+        else:
+            plt.hlines(static_avg[static_avg.index == i][var], 1987, 2003,
+                       color='k', linestyle='dashed', alpha=0.2)
+        plt.hlines(static_avg[static_avg.index == i][var], 2003, 2023,
+                   color='k', linestyle='dotted', alpha=0.2)
+    plt.grid()
+    plt.xlabel('year')
+    plt.ylabel(var)
 
 
 def stats(data, selection=()):
@@ -670,6 +702,16 @@ if __name__ == '__main__':
     for key in ['011', '025', '101', '109']:
         COUNTIES.pop(key, None)
 
+    iwr_data = pd.read_csv(os.path.join(main_dir, "iwr_cu_results_mf1997-2006.csv"),
+                           dtype={'county': str}, index_col='fid')
+    # print(iwr_data.columns)
+
+    # static_avg = iwr_data.groupby('county').mean()
+    # print('static_avg')
+    # print(static_avg)
+    # print(static_avg.index)
+    # print(static_avg[static_avg.index == '001']['dnrc_cu'])
+
     # # Establish sqlite connection
     # conec = sqlite3.connect(os.path.join(main_dir, "opnt_analysis_03042024_Copy.db"))  # full project
     # # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/random_05082024.db")  # test
@@ -677,20 +719,31 @@ if __name__ == '__main__':
     # # extract data
     # # gm_ct = gridmet_ct(conec)
     # # print(gm_ct)
-    # sum_data(conec, irrmapper=1, save="C:/Users/CND571/Documents/Data")
+    # # sum_data(conec, irrmapper=1, save="C:/Users/CND571/Documents/Data")
+    #
+    # time_series_data(conec, main_dir)
+    #
     # # por_data = sum_data(conec)
     #
     # # close connection
     # conec.close()
 
-    por_data_im = pd.read_csv("C:/Users/CND571/Documents/Data/cu_results_1987_2023_im1_mf1997-2006.csv",
-                              dtype={'county': str}, index_col='fid')
-    por_data = pd.read_csv("C:/Users/CND571/Documents/Data/cu_results_1987_2023_im0_mf1997-2006.csv",
-                           dtype={'county': str}, index_col='fid')
-    iwr_data = pd.read_csv("C:/Users/CND571/Documents/Data/iwr_cu_results_mf1997-2006.csv",
-                           dtype={'county': str}, index_col='fid')
-    print(por_data.columns)
-    print(iwr_data.columns)
+    # por_data_im = pd.read_csv("C:/Users/CND571/Documents/Data/cu_results_1987_2023_im1_mf1997-2006.csv",
+    #                           dtype={'county': str}, index_col='fid')
+    # por_data = pd.read_csv("C:/Users/CND571/Documents/Data/cu_results_1987_2023_im0_mf1997-2006.csv",
+    #                        dtype={'county': str}, index_col='fid')
+    # iwr_data = pd.read_csv("C:/Users/CND571/Documents/Data/iwr_cu_results_mf1997-2006.csv",
+    #                        dtype={'county': str}, index_col='fid')
+    # print(por_data.columns)
+    # print(iwr_data.columns)
+
+    ts_df = pd.read_csv(os.path.join(main_dir, 'ts_6yrs_im0_mf1997-2006.csv'),
+                        dtype={'county': str})  # , index_col=['county', 'st_year'])
+    print(ts_df)
+    print(ts_df.columns)
+
+    time_series_plot(ts_df, iwr_data, var='etbc')
+    time_series_plot(ts_df, iwr_data, var='dnrc_cu')
 
     # print(len(por_data_im['dnrc_cu'].unique()))
     # print(len(por_data['dnrc_cu'].unique()))
@@ -726,8 +779,6 @@ if __name__ == '__main__':
     # all_hist_1(por_data_im, iwr_data)
 
     # todo: time series w/ moving averages?
-
-    time_series(iwr_data)
 
     plt.show()
 

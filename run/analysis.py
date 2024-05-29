@@ -2,14 +2,24 @@
 import os
 
 import pandas as pd
-import sqlite3
+# import sqlite3
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import numpy as np
 
 from run_all import COUNTIES
 
 
 def sum_data(con, start=1987, end=2023, irrmapper=0, mf_periods='1997-2006', static_too=False, save=""):
+    """ Creates a dataframe summarizing results over a given time period by querying database.
+    con: sqplite connection
+    start: int, optional; first year in period of interest.
+    end: int, optional; last year in period of interest (inclusive).
+    irrmapper: int, optional; zero for results w/o irrmapper, 1 to draw results w/ irrmapper from db.
+    mf_periods: str, optional; which management factor to apply to results.
+    Options: '1997-2006', '1973-2006', or '1964-1973'
+    static_too: bool, optional; False to do nothing, True to query the static IWR result table for the same mf period.
+    """
     data = pd.read_sql("SELECT * FROM field_cu_results WHERE irrmapper={} AND mf_periods='{}' "
                        "AND year BETWEEN {} AND {}"
                        .format(irrmapper, mf_periods, start, end), con)
@@ -35,14 +45,18 @@ def sum_data(con, start=1987, end=2023, irrmapper=0, mf_periods='1997-2006', sta
 
 
 def time_series_data(con, save_dir):
-    the_index = pd.MultiIndex.from_product([COUNTIES.keys(), range(1987, 2018, 3)], names=["county", "st_year"])
+    """ Creates a moving-average time series of several result variables, and saves the result to a csv. """
+    window = 6
+    starts = range(1987, 2018, int(window/2))
+
+    the_index = pd.MultiIndex.from_product([COUNTIES.keys(), starts], names=["county", "st_year"])
     mov_avg = pd.DataFrame(index=the_index, columns=['etos', 'etbc', 'opnt_cu', 'dnrc_cu', 'frac_irr'])
     # for i in range(1987, 2018, 3):
-    for i in tqdm(range(1987, 2018, 3), total=11):
-        decade = sum_data(con, start=i, end=i+6)
+    for i in tqdm(starts, total=len(starts)):
+        decade = sum_data(con, start=i, end=i+window)
         grouped = decade.groupby('county').mean()
 
-        im = sum_data(con, start=i, end=i+6, irrmapper=1)
+        im = sum_data(con, start=i, end=i+window, irrmapper=1)
         im_grouped = im.groupby('county').mean()
 
         for j in COUNTIES.keys():
@@ -57,6 +71,7 @@ def time_series_data(con, save_dir):
 
 
 def gridmet_ct(con, pront=False):
+    """ Returns the number of distinct gridmet IDs in the db and each county. Optionally prints the results. """
     ct = {}
     gridmets = pd.read_sql("SELECT DISTINCT gfid FROM field_data", con)
     ct['total'] = len(gridmets)
@@ -248,39 +263,68 @@ def plot_results_1(data):
     plt.tight_layout()
 
 
-def county_hist(data, iwr, selection=()):
+def county_hist(data, iwr, selection=(), ymax=1000):
+    """ Makes 2 triple histograms (DNRC, DNRC climate, and OpenET) for ET and CU for each county given. """
     if len(selection) == 0:
         counties = data['county'].unique()
     else:
         counties = selection
+
+    bins_et = np.arange(20, 35)+0.5
+    bins_cu = np.arange(0, 25)+0.5
+
+    import matplotlib as mpl
+    clrs = mpl.colormaps['tab20'].colors
+
     for i in counties:
         plt.figure(figsize=(10, 5), dpi=200)
+        plt.suptitle("{} County ({})".format(COUNTIES[i], i))
 
         plt.subplot(121)
         plt.title("Average Seasonal ET (in)")
         # plt.hist(data[data['county'] == i]['etbc'], label='DNRC', zorder=5)
         # plt.hist(data[data['county'] == i]['etos'], label='Gridmet ETo', zorder=5)
-        plt.hist([data[data['county'] == i]['etbc'], data[data['county'] == i]['etos'],
-                  iwr[iwr['county'] == i]['etbc']],
-                 label=['DNRC', 'Gridmet ETo', 'IWR climate'], zorder=5)
+        plt.hist([data[data['county'] == i]['etbc'],
+                  iwr[iwr['county'] == i]['etbc'], data[data['county'] == i]['etos']],
+                 label=['DNRC', 'DNRC (climate)', 'Gridmet ETo'], zorder=5, bins=bins_et,
+                 color=[clrs[0], clrs[4], clrs[2]])
+        plt.vlines(data[data['county'] == i]['etbc'].mean(), 0, ymax, ls='dashed',
+                   label='mean: {:.2f}'.format(data[data['county'] == i]['etbc'].mean()), color=clrs[1])
+        plt.vlines(iwr[iwr['county'] == i]['etbc'].mean(), 0, ymax, ls='dashed',
+                   label='mean: {:.2f}'.format(iwr[iwr['county'] == i]['etbc'].mean()), color=clrs[5])
+        plt.vlines(data[data['county'] == i]['etos'].mean(), 0, ymax, ls='dashed',
+                   label='mean: {:.2f}'.format(data[data['county'] == i]['etos'].mean()), color=clrs[3])
         plt.grid(zorder=1)
+        # plt.legend(ncols=2)
         plt.legend()
+        plt.ylim(0, ymax)
 
         # CU comparison
         plt.subplot(122)
         plt.title("Average Seasonal Consumptive Use (in)")
         # plt.hist(data[data['county'] == i]['dnrc_cu'], label='DNRC', zorder=5)
         # plt.hist(data[data['county'] == i]['opnt_cu'], label='OpenET', zorder=5)
-        plt.hist([data[data['county'] == i]['dnrc_cu'], data[data['county'] == i]['opnt_cu'],
-                  iwr[iwr['county'] == i]['dnrc_cu']],
-                 label=['DNRC', 'OpenET', 'IWR climate'], zorder=5)
+        plt.hist([data[data['county'] == i]['dnrc_cu'],
+                  iwr[iwr['county'] == i]['dnrc_cu'], data[data['county'] == i]['opnt_cu']],
+                 label=['DNRC', 'DNRC (climate)', 'OpenET'], zorder=5, bins=bins_cu,
+                 color=[clrs[0], clrs[4], clrs[2]])
+        plt.vlines(data[data['county'] == i]['dnrc_cu'].mean(), 0, ymax*0.8, ls='dashed',
+                   label='mean: {:.2f}'.format(data[data['county'] == i]['dnrc_cu'].mean()), color=clrs[1])
+        plt.vlines(iwr[iwr['county'] == i]['dnrc_cu'].mean(), 0, ymax*0.8, ls='dashed',
+                   label='mean: {:.2f}'.format(iwr[iwr['county'] == i]['dnrc_cu'].mean()), color=clrs[5])
+        plt.vlines(data[data['county'] == i]['opnt_cu'].mean(), 0, ymax*0.8, ls='dashed',
+                   label='mean: {:.2f}'.format(data[data['county'] == i]['opnt_cu'].mean()), color=clrs[3])
         plt.grid(zorder=1)
+        # plt.legend(ncols=2)
         plt.legend()
+        plt.xlim(0, 25)
+        plt.ylim(0, ymax*0.8)
 
     plt.tight_layout()
 
 
 def county_hist_1(data, iwr):
+    """ Plots histograms of CU for each of the 52 counties in the database in one figure. Ugly, but effective. """
     plt.figure(figsize=(30, 10), dpi=200)
     plt.suptitle("Average Seasonal Consumptive Use (in)")
     # plt.suptitle("Average Seasonal ET (in)")
@@ -293,14 +337,14 @@ def county_hist_1(data, iwr):
         # plt.hist([data[data['county'] == i]['etbc'], data[data['county'] == i]['etos']],
         #          label=['DNRC', 'Gridmet ETo'], zorder=5)
         plt.title("{} ({})".format(COUNTIES[i], i), size=8)
-        bins = range(30)
-        # plt.hist([data[data['county'] == i]['dnrc_cu'], data[data['county'] == i]['opnt_cu']], bins=bins,
-        #          label=['DNRC', 'OpenET'], zorder=5)
+        bins = np.arange(30)+0.5
+        plt.hist([data[data['county'] == i]['dnrc_cu'], data[data['county'] == i]['opnt_cu']], bins=bins,
+                 label=['DNRC', 'OpenET'], zorder=5)
         # plt.hist([data[data['county'] == i]['dnrc_cu'], data[data['county'] == i]['opnt_cu'],
         #          iwr[iwr['county'] == i]['dnrc_cu']], bins=bins,
         #          label=['DNRC', 'OpenET', 'IWR climate'], zorder=5)
-        plt.hist([data[data['county'] == i]['dnrc_cu'], iwr[iwr['county'] == i]['dnrc_cu']], bins=bins,
-                 label=['DNRC', 'IWR climate'], zorder=5)
+        # plt.hist([data[data['county'] == i]['dnrc_cu'], iwr[iwr['county'] == i]['dnrc_cu']], bins=bins,
+        #          label=['DNRC', 'DNRC (climate)'], zorder=5)
         # plt.vlines(data[data['county'] == i]['dnrc_cu'].mean(), 0, 500, colors='tab:green')
         # plt.vlines(data[data['county'] == i]['opnt_cu'].mean(), 0, 500, colors='tab:pink')
         plt.grid(zorder=1)
@@ -321,7 +365,7 @@ def county_hist_1(data, iwr):
 def dif_hist(data):
     plt.figure(figsize=(10, 5))
     plt.title("Difference in Consumptive Use Estimate (inches, DNRC minus OpenET)")
-    bins = range(-10, 25)
+    bins = np.arange(-10, 25)+0.5
     plt.hist(data['dnrc_cu'] - data['opnt_cu'], bins=bins, zorder=5)
     # Extra stuff
     mean = (data['dnrc_cu'] - data['opnt_cu']).mean()
@@ -345,7 +389,7 @@ def dif_hist(data):
 def dif_hist_1(data, iwr):
     plt.figure(figsize=(10, 5))
     plt.title("Difference in Consumptive Use Estimate (inches, DNRC (climate) minus OpenET)")
-    bins = range(-10, 25)
+    bins = np.arange(-10, 25)+0.5
     plt.hist(iwr[iwr['county'] != '101']['dnrc_cu'] - data['opnt_cu'], bins=bins, zorder=5)
     # Extra stuff
     mean = (iwr[iwr['county'] != '101']['dnrc_cu'] - data['opnt_cu']).mean()
@@ -369,7 +413,7 @@ def dif_hist_1(data, iwr):
 def dif_hist_2(data, iwr):
     plt.figure(figsize=(10, 5))
     plt.title("Difference in Consumptive Use Estimate (inches, DNRC minus OpenET)")
-    bins = range(-10, 25)
+    bins = np.arange(-10, 25)+0.5
     # Daily difference
     plt.hist(data['dnrc_cu'] - data['opnt_cu'], bins=bins, zorder=5, label='DNRC (daily)',
              color='tab:blue', alpha=0.8)
@@ -413,24 +457,24 @@ def dif_hist_2(data, iwr):
 def all_hist_1(data, iwr):
     plt.figure(figsize=(10, 5))
     plt.title("Average Seasonal Consumptive Use Estimate (inches)")
-    bins = range(30)
+    bins = np.arange(-1, 30)+0.5
 
     # Option 1
-    plt.hist(data['dnrc_cu'], bins=bins, zorder=5, alpha=0.5, label='DNRC', color='tab:blue')
-    # plt.hist(iwr['dnrc_cu'], bins=bins, zorder=5, alpha=0.5, label='DNRC (climate)', color='tab:blue')
+    # plt.hist(data['dnrc_cu'], bins=bins, zorder=5, alpha=0.5, label='DNRC', color='tab:blue')
+    plt.hist(iwr['dnrc_cu'], bins=bins, zorder=5, alpha=0.5, label='DNRC (climate)', color='tab:blue')
     plt.hist(data['opnt_cu'], bins=bins, zorder=5, alpha=0.5, label='OpenET', color='tab:orange')
 
-    plt.vlines(data['dnrc_cu'].mean(), 0, 7000, zorder=7, color='tab:blue',
-               label='mean: {:.2f} in'.format(data['dnrc_cu'].mean()))
-    # plt.vlines(iwr['dnrc_cu'].mean(), 0, 8000, zorder=7, color='tab:blue',
-    #            label='mean: {:.2f} in'.format(iwr['dnrc_cu'].mean()))
-    plt.vlines(data['opnt_cu'].mean(), 0, 7000, zorder=7, color='tab:orange',
+    # plt.vlines(data['dnrc_cu'].mean(), 0, 8000, zorder=7, color='tab:blue',
+    #            label='mean: {:.2f} in'.format(data['dnrc_cu'].mean()))
+    plt.vlines(iwr['dnrc_cu'].mean(), 0, 8000, zorder=7, color='tab:blue',
+               label='mean: {:.2f} in'.format(iwr['dnrc_cu'].mean()))
+    plt.vlines(data['opnt_cu'].mean(), 0, 8000, zorder=7, color='tab:orange',
                label='mean: {:.2f} in'.format(data['opnt_cu'].mean()))
 
     # Option 2
-    # plt.hist([data['dnrc_cu'], data['opnt_cu'], iwr['dnrc_cu']], bins=bins, zorder=5, label=['DNRC', 'OpenET', 'IWR climate'])
+    # plt.hist([data['dnrc_cu'], data['opnt_cu'], iwr['dnrc_cu']],
+    #          bins=bins, zorder=5, label=['DNRC', 'OpenET', 'IWR climate'])
     # plt.hist([data['dnrc_cu'], iwr['dnrc_cu']], bins=bins, zorder=5, label=['DNRC', 'IWR climate'])
-
 
     # # Extra stuff
     # mean = (data['dnrc_cu'] - data['opnt_cu']).mean()
@@ -442,6 +486,51 @@ def all_hist_1(data, iwr):
     # plt.axvspan(mean-std, mean+std, 0, 5000, color='tab:pink', alpha=0.5, zorder=3)
 
     plt.ylim(0, 8000)
+    # plt.xlim(5, 30)
+    plt.xlim(0, 30)
+    plt.grid(zorder=1)
+    plt.legend(ncols=2)
+    # plt.ylim(0, 5000)
+
+    # print("average difference: {:.2f}".format((data['dnrc_cu'] - data['opnt_cu']).mean()))
+    # print("Fields with higher DNRC value: {:.2f}%"
+    #       .format(100*(data['dnrc_cu'] - data['opnt_cu']).gt(0).sum()/len(data)))
+
+
+def all_hist_2(data, data_im):
+    plt.figure(figsize=(10, 5))
+    plt.title("Average Seasonal Consumptive Use Estimate (inches)")
+    bins = np.arange(-1, 30)+0.5
+
+    # Option 1
+    # plt.hist(data['dnrc_cu'], bins=bins, zorder=5, alpha=0.5, label='DNRC', color='tab:blue')
+    plt.hist(data_im['dnrc_cu'], bins=bins, zorder=5, alpha=0.5, label='DNRC (IrrMapper)', color='tab:blue')
+    plt.hist(data['opnt_cu'], bins=bins, zorder=5, alpha=0.5, label='OpenET', color='tab:orange')
+
+    # plt.vlines(data['dnrc_cu'].mean(), 0, 8000, zorder=7, color='tab:blue',
+    #            label='mean: {:.2f} in'.format(data['dnrc_cu'].mean()))
+    plt.vlines(data_im['dnrc_cu'].mean(), 0, 8000, zorder=7, color='tab:blue',
+               label='mean: {:.2f} in'.format(data_im['dnrc_cu'].mean()))
+    plt.vlines(data['opnt_cu'].mean(), 0, 8000, zorder=7, color='tab:orange',
+               label='mean: {:.2f} in'.format(data['opnt_cu'].mean()))
+
+    # Option 2
+    # plt.hist([data['dnrc_cu'], data['opnt_cu'], iwr['dnrc_cu']],
+    #          bins=bins, zorder=5, label=['DNRC', 'OpenET', 'IWR climate'])
+    # plt.hist([data['dnrc_cu'], iwr['dnrc_cu']], bins=bins, zorder=5, label=['DNRC', 'IWR climate'])
+
+    # # Extra stuff
+    # mean = (data['dnrc_cu'] - data['opnt_cu']).mean()
+    # std = (data['dnrc_cu'] - data['opnt_cu']).std()
+    # plt.vlines(mean, 0, 5000, color='tab:pink', zorder=7,
+    #            label="mean: {:.2f}".format(mean))
+    # plt.vlines([mean - std, mean + std], 0, 5000, color='tab:pink', zorder=7,
+    #            label="std:     {:.2f}".format(std), linestyle='dashed')
+    # plt.axvspan(mean-std, mean+std, 0, 5000, color='tab:pink', alpha=0.5, zorder=3)
+
+    plt.ylim(0, 8000)
+    # plt.xlim(5, 30)
+    plt.xlim(0, 30)
     plt.grid(zorder=1)
     plt.legend(ncols=2)
     # plt.ylim(0, 5000)
@@ -452,6 +541,7 @@ def all_hist_1(data, iwr):
 
 
 def scatter(data):
+
     xs = []
     ys = []
     xs_err = []
@@ -473,9 +563,9 @@ def scatter(data):
     # plt.grid()
 
     from matplotlib.collections import PatchCollection
-    from matplotlib.patches import Rectangle, Ellipse
+    from matplotlib.patches import Ellipse
 
-    def make_error_boxes(ax, xdata, ydata, xerror, yerror, facecolor='tab:blue',
+    def make_error_boxes(ax1, xdata, ydata, xerror, yerror, facecolor='tab:blue',
                          edgecolor='none', alpha=0.15):
         # Loop over data points; create box from errors at each point
         # errorboxes = [Rectangle((x - xe, y - ye), xe*2, ye*2)
@@ -488,11 +578,11 @@ def scatter(data):
                              edgecolor=edgecolor, zorder=3)
 
         # Add collection to Axes
-        ax.add_collection(pc)
+        ax1.add_collection(pc)
 
         # Plot errorbars
-        artists = ax.errorbar(xdata, ydata, xerr=xerror, yerr=yerror,
-                              fmt='ko', ecolor='none', zorder=4, label='County Mean Values')
+        artists = ax1.errorbar(xdata, ydata, xerr=xerror, yerr=yerror,
+                               fmt='ko', ecolor='none', zorder=4, label='County Mean Values')
 
         return artists
 
@@ -656,24 +746,159 @@ def plot_results_3(data, iwr):
 def time_series_plot(ts_data, iwr, var):
     static_avg = iwr.groupby('county').mean()
 
+    vari = {'etbc': 'etbc', 'etos': 'etbc', 'dnrc_cu': 'dnrc_cu', 'opnt_cu': 'dnrc_cu'}
+
+    avg_ts = np.asarray([ts_data[ts_data['st_year'] == i][var].mean() for i in range(1987, 2018, 3)])
+    # for i in range(1987, 2018, 3):
+    #     avg.append(ts_data[ts_data['st_year'] == i][var].mean())
+    county_avg = [static_avg[static_avg.index == i][vari[var]].iloc[0] for i in COUNTIES.keys()]
+    # print(county_avg)
+
+    # plt.figure()
+    # bins = np.arange(23, 36)+0.5
+    # plt.hist(county_avg, bins=bins, zorder=3, rwidth=0.95)
+    # plt.title('Distribution of County-averaged DNRC Consumptive Use from IWR Climate')
+    # plt.xlabel('Consumptive Use Estimate (inches)')
+    # plt.ylabel('count')
+    # plt.grid(zorder=1)
+
+    # plt.figure()
+    # for i in COUNTIES.keys():
+    #     plt.plot(ts_data[ts_data['county'] == i]['st_year'] + 3, ts_data[ts_data['county'] == i][var],
+    #              alpha=0.3)
+    #     if i == '001':
+    #         plt.hlines(static_avg[static_avg.index == i][vari[var]], 1987, 2003,
+    #                    color='k', linestyle='dashed', alpha=0.2, label='DNRC (climate)')
+    #     else:
+    #         plt.hlines(static_avg[static_avg.index == i][vari[var]], 1987, 2003,
+    #                    color='k', linestyle='dashed', alpha=0.2)
+    #     plt.hlines(static_avg[static_avg.index == i][vari[var]], 2003, 2023,
+    #                color='k', linestyle='dotted', alpha=0.2)
+    # plt.plot(ts_data[ts_data['county'] == '001']['st_year'] + 3, avg_ts,
+    #          alpha=1, label='All county average')
+    # plt.hlines(static_avg[vari[var]].mean(), 1987, 2003,
+    #            color='k', linestyle='dashed', alpha=1)
+    # plt.hlines(static_avg[vari[var]].mean(), 2003, 2023,
+    #            color='k', linestyle='dotted', alpha=1)
+    # plt.grid()
+    # plt.xlabel('year')
+    # plt.ylabel(var)
+    # plt.legend()
+
+    code = {'etbc': 'DNRC ET (inches, met data minus climate)', 'etos': 'ET (inches, Gridmet minus climate)',
+            'dnrc_cu': 'DNRC CU (inches, met data minus climate)',
+            'opnt_cu': 'Consumptive Use (inches, DNRC minus climate)'}
+
+    code_title = {'etbc': 'DNRC ET', 'etos': 'ET (DNRC vs Gridmet ETo)',
+                  'dnrc_cu': 'DNRC Consumptive Use', 'opnt_cu': 'Consumptive Use (DNRC vs OpenET)'}
+
     plt.figure()
+    plt.title("Difference in {} over time".format(code_title[var]))
     for i in COUNTIES.keys():
-        plt.plot(ts_data[ts_data['county'] == i]['st_year'] + 3, ts_data[ts_data['county'] == i][var],
-                 alpha=0.3)
         if i == '001':
-            plt.hlines(static_avg[static_avg.index == i][var], 1987, 2003,
-                       color='k', linestyle='dashed', alpha=0.2, label='DNRC (climate)')
+            plt.plot(ts_data[ts_data['county'] == i]['st_year'] + 3,
+                     ts_data[ts_data['county'] == i][var] - static_avg[static_avg.index == i][vari[var]].iloc[0],
+                     alpha=0.2, color='tab:blue', label='Counties')
         else:
-            plt.hlines(static_avg[static_avg.index == i][var], 1987, 2003,
-                       color='k', linestyle='dashed', alpha=0.2)
-        plt.hlines(static_avg[static_avg.index == i][var], 2003, 2023,
-                   color='k', linestyle='dotted', alpha=0.2)
+            plt.plot(ts_data[ts_data['county'] == i]['st_year'] + 3,
+                     ts_data[ts_data['county'] == i][var] - static_avg[static_avg.index == i][vari[var]].iloc[0],
+                     alpha=0.2, color='tab:blue')
+    plt.plot(ts_data[ts_data['county'] == '001']['st_year'] + 3, avg_ts - static_avg[vari[var]].mean(),
+             alpha=1, label='All county average', color='tab:pink')
+    plt.hlines(0, 1990, 2020, 'k')
     plt.grid()
     plt.xlabel('year')
-    plt.ylabel(var)
+    plt.ylabel((code[var]))
+    plt.legend()
+
+
+def time_series_plot_2(ts_data, iwr):
+    """ Plot the average field fraction irrigated over time in each county and overall. """
+    static_avg = iwr.groupby('county').mean()
+
+    avg_ts = np.asarray([ts_data[ts_data['st_year'] == i]['frac_irr'].mean() for i in range(1987, 2018, 3)])
+    # for i in range(1987, 2018, 3):
+    #     avg.append(ts_data[ts_data['st_year'] == i][var].mean())
+    # county_avg = [static_avg[static_avg.index == i][vari[var]].iloc[0] for i in COUNTIES.keys()]
+    # print(county_avg)
+
+    # plt.figure()
+    # bins = np.arange(23, 36)+0.5
+    # plt.hist(county_avg, bins=bins, zorder=3, rwidth=0.95)
+    # plt.title('Distribution of County-averaged DNRC Consumptive Use from IWR Climate')
+    # plt.xlabel('Consumptive Use Estimate (inches)')
+    # plt.ylabel('count')
+    # plt.grid(zorder=1)
+
+    plt.figure()
+    plt.title('Average fraction of field classified as irrigated (IrrMapper)')
+    for i in COUNTIES.keys():
+        plt.plot(ts_data[ts_data['county'] == i]['st_year'] + 3, ts_data[ts_data['county'] == i]['frac_irr'],
+                 alpha=0.3)
+    plt.plot(ts_data[ts_data['county'] == '001']['st_year'] + 3, avg_ts,
+             alpha=1, label='All county average', color='k')
+    plt.grid()
+    plt.xlabel('year')
+    plt.ylabel('fraction irrigated')
+    plt.legend()
+    plt.ylim(0, 1)
+
+
+def time_series_plot_1(ts_data, iwr):
+    """ Make a 2x2 grid figure of 4 variables' differences from the DNRC climate estimate. """
+    static_avg = iwr.groupby('county').mean()
+
+    vari = {'etbc': 'etbc', 'dnrc_cu': 'dnrc_cu', 'etos': 'etbc', 'opnt_cu': 'dnrc_cu'}
+
+    code = {'etbc': 'DNRC ET (inches, met data minus climate)', 'etos': 'ET (inches, Gridmet minus climate)',
+            'dnrc_cu': 'DNRC CU (inches, met data minus climate)',
+            'opnt_cu': 'Consumptive Use (inches, DNRC minus climate)'}
+
+    code_title = {'etbc': 'DNRC ET', 'etos': 'ET (DNRC vs Gridmet ETo)',
+                  'dnrc_cu': 'DNRC Consumptive Use', 'opnt_cu': 'Consumptive Use (DNRC vs OpenET)'}
+
+    plt.figure(figsize=(12, 8))
+    j = 1
+    for k in vari.keys():
+        plt.subplot(2, 2, j)
+        avg_ts = np.asarray([ts_data[ts_data['st_year'] == i][k].mean() for i in range(1987, 2018, 3)])
+        # for i in range(1987, 2018, 3):
+        #     avg.append(ts_data[ts_data['st_year'] == i][var].mean())
+        county_avg = [static_avg[static_avg.index == i][vari[k]].iloc[0] for i in COUNTIES.keys()]
+        # print(county_avg)
+
+        plt.title("Difference in {} over time".format(code_title[k]))
+        for i in COUNTIES.keys():
+            if i == '001':
+                plt.plot(ts_data[ts_data['county'] == i]['st_year'] + 3,
+                         ts_data[ts_data['county'] == i][k] - static_avg[static_avg.index == i][vari[k]].iloc[0],
+                         alpha=0.2, color='tab:blue', label='Counties')
+            else:
+                plt.plot(ts_data[ts_data['county'] == i]['st_year'] + 3,
+                         ts_data[ts_data['county'] == i][k] - static_avg[static_avg.index == i][vari[k]].iloc[0],
+                         alpha=0.2, color='tab:blue')
+        plt.plot(ts_data[ts_data['county'] == '001']['st_year'] + 3, avg_ts - static_avg[vari[k]].mean(),
+                 alpha=1, label='All county average', color='tab:pink')
+        plt.hlines(0, 1990, 2020, 'k')
+        plt.grid()
+        if j > 2:
+            plt.xlabel('year')
+        else:
+            plt.ylim(-8, 8)
+        plt.ylabel((code[k]))
+        if j == 2:
+            plt.legend()
+        elif j == 3:
+            plt.ylim(-8, 8)
+        elif j == 4:
+            plt.ylim(-14, 2)
+
+        j += 1
+    plt.tight_layout()
 
 
 def stats(data, selection=()):
+    """ Not very interesting, needs work. """
     if len(selection) == 0:
         counties = data['county'].unique()
     else:
@@ -684,7 +909,7 @@ def stats(data, selection=()):
     results = pd.DataFrame(columns=['neg_cu'], index=counties)
 
     for i in counties:
-        # percent of fields with a negative CU
+        # fields with a negative CU
         results.loc[i, 'neg_cu'] = data[data['county'] == i]['opnt_cu'].lt(0).sum()  # / len(data[data['county'] == i])
 
     return all_results, results
@@ -702,8 +927,8 @@ if __name__ == '__main__':
     for key in ['011', '025', '101', '109']:
         COUNTIES.pop(key, None)
 
-    iwr_data = pd.read_csv(os.path.join(main_dir, "iwr_cu_results_mf1997-2006.csv"),
-                           dtype={'county': str}, index_col='fid')
+    # iwr_data = pd.read_csv(os.path.join(main_dir, "iwr_cu_results_mf1997-2006.csv"),
+    #                        dtype={'county': str}, index_col='fid')
     # print(iwr_data.columns)
 
     # static_avg = iwr_data.groupby('county').mean()
@@ -728,22 +953,26 @@ if __name__ == '__main__':
     # # close connection
     # conec.close()
 
-    # por_data_im = pd.read_csv("C:/Users/CND571/Documents/Data/cu_results_1987_2023_im1_mf1997-2006.csv",
-    #                           dtype={'county': str}, index_col='fid')
-    # por_data = pd.read_csv("C:/Users/CND571/Documents/Data/cu_results_1987_2023_im0_mf1997-2006.csv",
-    #                        dtype={'county': str}, index_col='fid')
-    # iwr_data = pd.read_csv("C:/Users/CND571/Documents/Data/iwr_cu_results_mf1997-2006.csv",
-    #                        dtype={'county': str}, index_col='fid')
+    por_data_im = pd.read_csv("C:/Users/CND571/Documents/Data/cu_results_1987_2023_im1_mf1997-2006.csv",
+                              dtype={'county': str}, index_col='fid')
+    por_data = pd.read_csv("C:/Users/CND571/Documents/Data/cu_results_1987_2023_im0_mf1997-2006.csv",
+                           dtype={'county': str}, index_col='fid')
+    iwr_data = pd.read_csv("C:/Users/CND571/Documents/Data/iwr_cu_results_mf1997-2006.csv",
+                           dtype={'county': str}, index_col='fid')
     # print(por_data.columns)
     # print(iwr_data.columns)
 
     ts_df = pd.read_csv(os.path.join(main_dir, 'ts_6yrs_im0_mf1997-2006.csv'),
                         dtype={'county': str})  # , index_col=['county', 'st_year'])
-    print(ts_df)
-    print(ts_df.columns)
+    # print(ts_df)
+    # print(ts_df.columns)
 
-    time_series_plot(ts_df, iwr_data, var='etbc')
-    time_series_plot(ts_df, iwr_data, var='dnrc_cu')
+    # time_series_plot(ts_df, iwr_data, var='etbc')
+    # time_series_plot(ts_df, iwr_data, var='dnrc_cu')
+    # time_series_plot(ts_df, iwr_data, var='etos')
+    # time_series_plot(ts_df, iwr_data, var='opnt_cu')
+    # time_series_plot_1(ts_df, iwr_data)
+    # time_series_plot_2(ts_df, iwr_data)
 
     # print(len(por_data_im['dnrc_cu'].unique()))
     # print(len(por_data['dnrc_cu'].unique()))
@@ -760,7 +989,8 @@ if __name__ == '__main__':
 
     # plot_results_2(por_data)  # this looks good
     # plot_results_3(por_data, iwr_data)
-    # county_hist(por_data, iwr_data, selection=('001',))
+    # county_hist(por_data, iwr_data, selection=('029',), val=500)
+    # county_hist(por_data, iwr_data, selection=('067',))
     # county_hist_1(por_data, iwr_data)
     # dif_hist(por_data)  # this looks good
     # dif_hist_1(por_data, iwr_data)
@@ -772,13 +1002,13 @@ if __name__ == '__main__':
     # plot_results_3(por_data_im, iwr_data)
     # county_hist(por_data_im, iwr_data, selection=('001',))
     # county_hist_1(por_data_im, iwr_data)
-    # dif_hist(por_data_im)  # this looks good
+    # dif_hist(por_data_im)
     # dif_hist_1(por_data_im, iwr_data)
     # dif_hist_2(por_data_im, iwr_data)
-    # scatter(por_data_im)  # this is nice
+    # scatter(por_data_im)
     # all_hist_1(por_data_im, iwr_data)
 
-    # todo: time series w/ moving averages?
+    # all_hist_2(por_data, por_data_im)
 
     plt.show()
 

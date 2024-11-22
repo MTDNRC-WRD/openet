@@ -10,8 +10,9 @@ from tqdm import tqdm
 import sqlite3
 from datetime import timedelta
 from geopy import distance
+from chmdata.thredds import GridMet
 
-from utils.thredds import GridMet
+# from utils.thredds import GridMet
 from iwr.iwr_approx import iwr_daily_fm, iwr_database
 
 # Only used in corrected_gridmet functions and variations. When only one is active, put this inside so that it
@@ -136,6 +137,12 @@ MANAGEMENT_FACTORS = {'001': [0.64, 0.83, 0.88], '003': [0.55, 0.79, 0.88], '005
 
 
 def init_db_tables(con):
+    """ Initialize the tables in the sqlite database.
+
+    Parameters
+    ----------
+    con: sqlite database connection object
+    """
     cur = con.cursor()
 
     # # Old table formats
@@ -789,15 +796,19 @@ def cu_analysis_db(con, shp, gridmet, etof, out, start=1985, end=2024,
     """
     Calculate average seasonal consumptive use with both IWR/DNRC and OpenET methods.
 
-    :con: sqlite database connection
-    :shp: str, name of table in sqlite database associated with field/gridmet lookup
-    :gridmet: str, name of table in sqlite database associated with gridmet data
-    :start: int, year of beginning of period of study
-    :end: int, year after end of period of study
-    :etof: str, name of table in sqlite database containing etof data
-    :out: str, name of table in sqlite database containing results of consumptive use analysis by field
-    :mf_timeperiod: int, which set of management factors to apply to dnrc_cu calculations, acceptable values of
+    Parameters
+    ----------
+    con: sqlite database connection
+    shp: str, name of table in sqlite database associated with field/gridmet lookup
+    gridmet: str, name of table in sqlite database associated with gridmet data
+    etof: str, name of table in sqlite database containing etof data
+    out: str, name of table in sqlite database containing results of consumptive use analysis by field
+    start: int, year of beginning of period of study
+    end: int, year after end of period of study
+    irrmapper: bool, optional
+    mf_timeperiod: int, which set of management factors to apply to dnrc_cu calculations, acceptable values of
     0, 1, or 2 to correspond to the three time periods/set of management factors described in the rule.
+    selection: GeoDataFrame, optional
     """
     mf_list = ['1964-1973', '1973-2006', '1997-2006']
 
@@ -953,18 +964,18 @@ def cu_analysis_db(con, shp, gridmet, etof, out, start=1985, end=2024,
 
 
 def iwr_static_cu_analysis_db(con, shp, out, clim_db_loc, mf_timeperiod=2, selection=gpd.GeoDataFrame(), iwr_coord=""):
-    """
-    Calculate average seasonal consumptive use with IWR climate database files.
+    """ Calculate average seasonal consumptive use with IWR climate database files.
 
-    :con: sqlite database connection
-    :shp: str, name of table in sqlite database associated with field/gridmet lookup
-    :gridmet: str, name of table in sqlite database associated with gridmet data
-    :start: int, year of beginning of period of study
-    :end: int, year after end of period of study
-    :etof: str, name of table in sqlite database containing etof data
-    :out: str, name of table in sqlite database containing results of consumptive use analysis by field
-    :mf_timeperiod: int, which set of management factors to apply to dnrc_cu calculations, acceptable values of
+    Parameters
+    ----------
+    con: sqlite database connection
+    shp: str, name of table in sqlite database associated with field/gridmet lookup
+    out: str, name of table in sqlite database containing results of consumptive use analysis by field
+    clim_db_loc:
+    mf_timeperiod: int, which set of management factors to apply to dnrc_cu calculations, acceptable values of
     0, 1, or 2 to correspond to the three time periods/set of management factors described in the rule.
+    selection: GeoDataFrame, optional
+    iwr_coord:
     """
     mf_list = ['1964-1973', '1973-2006', '1997-2006']
 
@@ -1026,7 +1037,7 @@ def iwr_static_cu_analysis_db(con, shp, out, clim_db_loc, mf_timeperiod=2, selec
             mfs.append(mf)
             fids.append(fid)
 
-            station = closest_iwr_station(row, iwr_stations)
+            station = closest_iwr_station_best(row, iwr_stations)
 
             # Calculating bc seasonal ET
             bc, start1, end1 = iwr_database(clim_db_loc, station, fullmonth=True, pivot=pivot)
@@ -1053,7 +1064,15 @@ def iwr_static_cu_analysis_db(con, shp, out, clim_db_loc, mf_timeperiod=2, selec
 
 # Might still be needed for gridmet? Not needed if db tables are created properly.
 def pd_to_sql_ignore_on_conflict(table, conn, keys, data_iter):
-    """ For use as argument in pandas.DataFrame.to_sql 'method' parameter. """
+    """ For use as argument in pandas.DataFrame.to_sql 'method' parameter.
+
+    Parameters
+    ----------
+    table:
+    conn:
+    keys:
+    data_iter:
+    """
     data = [row for row in data_iter]
     # stmt = "INSERT OR IGNORE INTO {} VALUES(?, ?, ?, ?)".format(table.name)  # generalized to variable len below.
     stmt = "INSERT OR IGNORE INTO {} VALUES(".format(table.name)
@@ -1078,13 +1097,17 @@ def iwr_station_data(file_loc="C:/Users/CND571/Documents/iwr_stations.geojson"):
 
 
 def closest_iwr_station(row, jack):
-    """ Find IWR station closest to given field.
+    """ Find IWR station closest to given field. Original option.
 
     If there are IWR stations in the same county as the field, the closest of those will be chosen.
     Otherwise, all 180 stations will be searched for the closest station.
 
+    Parameters
+    ----------
     row: field data
     jack: pandas dataframe containing IWR station info.
+
+    returns best match qualities: station number, distance from field, and elevation
     """
     field_county = row[4]
     field_lat = row[6]
@@ -1098,14 +1121,222 @@ def closest_iwr_station(row, jack):
             dists.append(this_dist)
         best_stn = dists.index(min(dists))
         best_stn_no = jack.iloc[best_stn]['station_no']
+        best_stn_elev = jack.iloc[best_stn]['elev']/3.281
     else:  # search stations within county
         for i, stn in options.iterrows():
             this_dist = distance.geodesic((field_lat, field_lon), (stn['lat'], stn['lon'])).km
             dists.append(this_dist)
         best_stn = dists.index(min(dists))
         best_stn_no = options.iloc[best_stn]['station_no']
+        best_stn_elev = options.iloc[best_stn]['elev']/3.281
 
-    return best_stn_no
+    return best_stn_no, min(dists), best_stn_elev
+
+
+def closest_iwr_station_1(row, jack):
+    """ Find IWR station closest to given field.
+
+    All 180 stations will be searched for the closest station.
+
+    Parameters
+    ----------
+    row: field data
+    jack: pandas dataframe containing IWR station info.
+
+    returns best match qualities: station number, distance from field, and elevation
+    """
+    field_county = row[4]
+    field_lat = row[6]
+    field_lon = row[7]
+
+    dists = []
+
+    for i, stn in jack.iterrows():
+        this_dist = distance.geodesic((field_lat, field_lon), (stn['lat'], stn['lon'])).km
+        dists.append(this_dist)
+    best_stn = dists.index(min(dists))
+    best_stn_no = jack.iloc[best_stn]['station_no']
+    best_stn_elev = jack.iloc[best_stn]['elev']/3.281
+
+    return best_stn_no, min(dists), best_stn_elev
+
+
+def closest_iwr_station_2(row, jack):
+    """ Find representative IWR station for given field.
+
+    If there are no IWR stations in the same county as the field, the closest station will be chosen.
+    Otherwise, both the closest station and the closest station within the county will be identified.
+    Of the two potential stations, the one that is closer in elevation to the field will be chosen.
+
+    Parameters
+    ----------
+    row: field data
+    jack: pandas dataframe containing IWR station info.
+
+    returns best match qualities: station number, distance from field, and elevation
+    """
+    field_county = row[4]
+    field_lat = row[6]
+    field_lon = row[7]
+    field_elev = row[8]  # m
+
+    options = jack[jack['county_no'] == field_county]
+    dists = []
+    dists1 = []
+    if options.empty:  # search all stations, choose closest
+        for i, stn in jack.iterrows():
+            this_dist = distance.geodesic((field_lat, field_lon), (stn['lat'], stn['lon'])).km
+            dists.append(this_dist)
+        best_stn = dists.index(min(dists))
+        best_stn_no = jack.iloc[best_stn]['station_no']
+        best_stn_elev = jack.iloc[best_stn]['elev']/3.281
+        return best_stn_no, min(dists), best_stn_elev
+    else:  # search stations within county, compare elevation with closest overall station
+        # stations within county
+        for i, stn in options.iterrows():
+            this_dist = distance.geodesic((field_lat, field_lon), (stn['lat'], stn['lon'])).km
+            dists1.append(this_dist)
+        best_stn1 = dists1.index(min(dists1))
+        best_stn_no1 = options.iloc[best_stn1]['station_no']
+        best_stn_elev1 = options.iloc[best_stn1]['elev']/3.281
+        # all stations
+        for i, stn in jack.iterrows():
+            this_dist = distance.geodesic((field_lat, field_lon), (stn['lat'], stn['lon'])).km
+            dists.append(this_dist)
+        best_stn = dists.index(min(dists))
+        best_stn_no = jack.iloc[best_stn]['station_no']
+        best_stn_elev = jack.iloc[best_stn]['elev']/3.281
+        # prioritize elevation accuracy
+        if np.abs(field_elev - best_stn_elev) < np.abs(field_elev - best_stn_elev1):  # Sign direction?
+            return best_stn_no, min(dists), best_stn_elev  # overall closest
+        else:
+            return best_stn_no1, min(dists1), best_stn_elev1  # closest in county
+
+
+# Old algorthim (closest_iwr_station) was used for current results as of 6/18/2024.
+# New table must be made to use this algorithm (same as closest_iwr_station_2).
+def closest_iwr_station_best(row, jack):
+    """ Find representative IWR station for given field.
+
+    Guidance from rule: "most representative station" is not necessarily within the same county,
+    and must be at a similar elevation and climactic conditions.
+
+    This algorithm: If there are no IWR stations in the same county as the field, the closest station will be chosen.
+    Otherwise, both the closest station and the closest station within the county will be identified.
+    Of the two potential stations, the one that is closer in elevation to the field will be chosen.
+
+    Parameters
+    ----------
+    row: field data
+    jack: pandas dataframe containing IWR station info.
+    """
+    field_county = row[4]
+    field_lat = row[6]
+    field_lon = row[7]
+    field_elev = row[8]  # m
+
+    options = jack[jack['county_no'] == field_county]
+    dists = []
+    dists1 = []
+
+    # search all stations, choose closest
+    for i, stn in jack.iterrows():
+        this_dist = distance.geodesic((field_lat, field_lon), (stn['lat'], stn['lon'])).km
+        dists.append(this_dist)
+    best_stn = dists.index(min(dists))
+    best_stn_no = jack.iloc[best_stn]['station_no']
+    best_stn_elev = jack.iloc[best_stn]['elev'] / 3.281
+
+    if options.empty:
+        return best_stn_no
+    else:  # search stations within county, compare elevation with closest overall station
+        # search stations within county
+        for i, stn in options.iterrows():
+            this_dist = distance.geodesic((field_lat, field_lon), (stn['lat'], stn['lon'])).km
+            dists1.append(this_dist)
+        best_stn1 = dists1.index(min(dists1))
+        best_stn_no1 = options.iloc[best_stn1]['station_no']
+        best_stn_elev1 = options.iloc[best_stn1]['elev'] / 3.281
+        # prioritize elevation accuracy
+        if np.abs(field_elev - best_stn_elev) < np.abs(field_elev - best_stn_elev1):
+            return best_stn_no  # overall closest
+        else:
+            return best_stn_no1  # closest in county
+
+
+def test_iwr_station_search(con, shp, iwr_coord=""):
+    """ Compare different search schemes for IWR stations. """
+
+    cur = con.cursor()
+
+    num = 1000
+
+    fids = pd.read_sql("SELECT fid FROM field_data", con)
+    fids = fids.sample(n=num, random_state=23)  # Constant seed to make reproducible
+
+    # # Not reproducible, but might be much faster?
+    # fids = pd.read_sql("SELECT fid FROM field_data WHERE fid IN "
+    #                    "(SELECT fid FROM field_data ORDER BY RANDOM() LIMIT 100)", con)
+
+    if len(iwr_coord) > 0:
+        iwr_stations = iwr_station_data(iwr_coord)
+    else:
+        iwr_stations = iwr_station_data()
+
+    same = []
+    elev_bet = []
+    mean_dist = np.zeros(num)
+    mean_dist1 = np.zeros(num)
+    mean_dist2 = np.zeros(num)
+    mean_elev = np.zeros(num)
+    mean_elev1 = np.zeros(num)
+    mean_elev2 = np.zeros(num)
+    for i in range(num):
+        fid = fids.values[i][0]
+        row = cur.execute("SELECT * FROM {} WHERE fid=?".format(shp), (fid,)).fetchone()
+        station, dist, elev = closest_iwr_station(row, iwr_stations)
+        station1, dist1, elev1 = closest_iwr_station_1(row, iwr_stations)
+        station2, dist2, elev2 = closest_iwr_station_2(row, iwr_stations)
+        mean_dist[i] = dist
+        mean_dist1[i] = dist1
+        mean_dist2[i] = dist2
+        mean_elev[i] = elev - row[-1]
+        mean_elev1[i] = elev1 - row[-1]
+        mean_elev2[i] = elev2 - row[-1]
+        if station == station1:
+            same.append(i)
+            # print("{} {:.1f} m".format(fid, row[-1]))
+            # print("{} {:.1f} m {:.2f} km".format(station, elev, dist))
+            # print()
+        else:
+            if np.abs(mean_elev[i]) > np.abs(mean_elev1[i]):
+                elev_bet.append(i)
+            # print(fid, "{:.1f} m".format(row[-1]))
+            # print("{} {:.1f} m {:.2f} km".format(station, elev, dist))
+            # print("{} {:.1f} m {:.2f} km".format(station1, elev1, dist1))
+            # print()
+    mean_elev = np.abs(mean_elev)
+    mean_elev1 = np.abs(mean_elev1)
+    mean_elev2 = np.abs(mean_elev2)
+    dif = list(range(num))
+    for i in same:
+        dif.remove(i)
+
+    print("{}/{} stations same result ({:.1f}%)".format(len(same), num, 100*len(same)/num))
+    print("{}/{} changed stations had elevation match improve ({:.1f}%)"
+          .format(len(elev_bet), num-len(same), 100*len(elev_bet)/(num-len(same))))
+    print("Options: closest in county, closest, choose btwn in-county and closest based on elevation match")
+    print("Average difference in elevation: {:.1f} {:.1f} {:.1f} m"
+          .format(mean_elev.mean(), mean_elev1.mean(), mean_elev2.mean()))
+    print("Average distance from field: {:.1f} {:.1f} {:.1f} km"
+          .format(mean_dist.mean(), mean_dist1.mean(), mean_dist2.mean()))
+    print()
+    print("Average difference in elevation: {:.1f} {:.1f} {:.1f} m"
+          .format(mean_elev[dif].mean(), mean_elev1[dif].mean(), mean_elev2[dif].mean()))
+    print("Average distance from field: {:.1f} {:.1f} {:.1f} km"
+          .format(mean_dist[dif].mean(), mean_dist1[dif].mean(), mean_dist2[dif].mean()))
+
+    cur.close()
 
 
 if __name__ == '__main__':
@@ -1143,6 +1374,16 @@ if __name__ == '__main__':
     mt_fields['area_m2'] = mt_fields['geometry'].area
     tiny_fields = mt_fields[mt_fields['area_m2'] < 100].index
     clean_sid = mt_fields.drop(tiny_fields)
+
+    # # Looking at distribution of field sizes
+    # print(clean_sid['area_m2'].sort_values() / 1e6)
+    # print(clean_sid[clean_sid['area_m2'] < 1e6].count())
+    # print(clean_sid[clean_sid['area_m2'] > 2e6].count())
+    # import matplotlib.pyplot as plt
+    # plt.figure()
+    # (clean_sid['area_m2']/1e6).hist(bins=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], log=True)
+    # plt.show()
+
     mt_fields = clean_sid.drop(columns=['area_m2'])
     # optional county subset
     # mt_fields = mt_fields[mt_fields['county'] == '019']
@@ -1150,7 +1391,7 @@ if __name__ == '__main__':
     # # Database stuff
     # # --------------
 
-    conec = sqlite3.connect(os.path.join(main_dir, "opnt_analysis_03042024_Copy.db"))  # full project
+    # conec = sqlite3.connect(os.path.join(main_dir, "opnt_analysis_03042024_Copy.db"))  # full project
     # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/random_05082024.db")  # test
 
     # # Initialize tables with correct column names/types/primary keys
@@ -1168,17 +1409,17 @@ if __name__ == '__main__':
     # # Populate gridmet db table (takes forever)
     # corrected_gridmet_db_1(conec, gridmet_cent, fields_db, gm_ts, rasters_, pos_start, pos_end)
 
-    # Populate consumptive use result db table (about 30 hours?)
-    for k in ['011', '025', '101', '109']:  # issue w/ 101 etof data
-        COUNTIES.pop(k, None)
-    cntys = list(COUNTIES.keys())
-    for i in cntys:
-        print(i)
-        fields = mt_fields[mt_fields['county'] == i]
-        cu_analysis_db(conec, fields_db, gm_ts, etof_db, results, 1987, 2024, selection=fields)
-
-    # # Populate IWR static climate consumptive use result db table (about 30 mins?)
-    # iwr_static_cu_analysis_db(conec, fields_db, iwr_cu_db, iwr_clim_loc, iwr_coord=iwr_coord_loc)
+    # # Populate consumptive use result db table (about 30 hours?)
+    # for k in ['011', '025', '101', '109']:  # issue w/ 101 etof data
+    #     COUNTIES.pop(k, None)
+    # cntys = list(COUNTIES.keys())
+    # for i in cntys:
+    #     print(i)
+    #     fields = mt_fields[mt_fields['county'] == i]
+    #     cu_analysis_db(conec, fields_db, gm_ts, etof_db, results, 1987, 2024, selection=fields)
+    #
+    # # # Populate IWR static climate consumptive use result db table (about 30 mins?)
+    # # iwr_static_cu_analysis_db(conec, fields_db, iwr_cu_db, iwr_clim_loc, iwr_coord=iwr_coord_loc)
 
     # # SCRATCH WORK
 
@@ -1196,7 +1437,7 @@ if __name__ == '__main__':
     # cursor.execute("PRAGMA optimize")
     # cursor.close()
 
-    conec.commit()
-    conec.close()
+    # conec.commit()
+    # conec.close()
 
 # ========================= EOF ====================================================================

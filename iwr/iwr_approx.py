@@ -26,8 +26,15 @@ alfalfa_kc = [0.6, 0.63, 0.68, 0.73, 0.79, 0.86, 0.92, 0.98, 1.04, 1.08, 1.12, 1
 
 
 def effective_ppt_table():
-    """Load effective precip table from file."""
-    # NEH 2-148, table 2-43
+    """ Load effective precip table from file.
+
+    From National Engineering Handbook (NEH) Ch 2, pg 148, Table 2-43.
+
+    Returns
+    -------
+    pandas DataFrame of effective precipitation table.
+    """
+
     if os.path.exists('F:/FileShare'):
         main_dir = 'F:/FileShare/openet_pilot'
     else:
@@ -37,8 +44,7 @@ def effective_ppt_table():
 
 
 def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
-    """
-    Replicate functionality of IWR as used by MT DNRC for HUA analysis using IWR databases.
+    """ Replicate functionality of IWR as used by MT DNRC for HUA analysis using IWR databases.
 
     Only works for stations listed in Table 1 in Rule 36.12.1902
     Custom implementation of the SCS Blaney Criddle method.
@@ -46,13 +52,19 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
     Climate db is already in Fahrenheit.
     Calculates effective precip assuming a dry year/80% chance.
 
-    :param station: str, last 4 digits of station number
-    :param clim_db_loc: path to IWR climate database
-    :param fullmonth: optional, bool, set growing season to a predefined period of full months (for testing purposes)
-    :param pivot: optional, bool describing irrigation type: either pivot (True) or other (False)
-    :return: dataframe with intermediate calculations, and the dates of the growing season.
+    Parameters
+    ----------
+    station: str, last 4 digits of station number
+    clim_db_loc: path to IWR climate database
+    fullmonth: optional, bool, set growing season to a predefined period of full months (for testing purposes)
+    pivot: optional, bool describing irrigation type: either pivot (True) or other (False)
+
+    Returns
+    -------
+    pandas DataFrame with intermediate calculations, and the dates of the growing season.
     Last 3 columns of dataframe are first 3 columns of IWR program output. Sum columns to get totals.
     """
+
     # 2000 is used arbitrarily to get a year's worth of daily time stamps.
     yr_ind = pd.date_range('2000-01-01', '2000-12-31', freq='d')
 
@@ -336,14 +348,19 @@ def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', sea
     at the start and end of the growing season have been removed.
     It is not advised to change the default start and end dates.
 
-    :param df: pandas DataFrame with meteorological time series data: average daily temperature (Celsius)
+    Parameters
+    ----------
+    df: pandas DataFrame with meteorological time series data: average daily temperature (Celsius)
     and daily precipitation (mm)
-    :param lat_degrees: number, latitude of location
-    :param elev: number, elevation of location
-    :param season_start: optional, str, should be first of month
-    :param season_end: optional, str, should be last of month
-    :param pivot: optional, bool describing irrigation type: either pivot (True) or other (False)
-    :return: dataframe with intermediate calculations, and the dates of the growing season.
+    lat_degrees: number, latitude of location
+    elev: number, elevation of location
+    season_start: optional, str, should be first of month
+    season_end: optional, str, should be last of month
+    pivot: optional, bool describing irrigation type: either pivot (True) or other (False)
+
+    Returns
+    -------
+    dataframe with intermediate calculations, and the dates of the growing season.
     Last 3 columns of dataframe are first 3 columns of IWR program output. Sum columns to get totals.
     """
 
@@ -536,13 +553,21 @@ def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=Non
     Custom implementation of the SCS Blaney Criddle method.
     Assumes inout data is in Celsius and rain in mm.
     Includes calculation of effective precip per NEH Ch2, pgs 147-152 (pdf 165-170)
-    :param df:
-    :param lat_degrees:
-    :param elev:
-    :param season_start:
-    :param season_end:
-    :param pivot:
-    :return:
+
+    Parameters
+    ----------
+    df:
+    lat_degrees:
+    elev:
+    season_start:
+    season_end:
+    pivot: bool, optional; whether the field is irrgiated with a center pivot (True) or not (False)
+
+    Returns
+    -------
+    df:
+    season_start:
+    season_end:
     """
 
     # NEH 2-233 "...mean temperature is assumed to occur on the 15th day of each month..."
@@ -822,8 +847,19 @@ def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=Non
 def run_one_iwr_station(station='2409', clim_db_loc=None, data_dir=None,
                         start='1970-01-01', end='2000-12-31', pivot=True):
     """ Runs the IWR algorithm for a single location, and prints out the results.
+
     Runs either iwr_db, iwr_daily, or both depending on which file paths are provided as parameters.
-    Start and end dates do not affect iwr_db. """
+    Start and end dates do not affect iwr_db.
+
+    Parameters
+    ----------
+    station: str, optional; the 4-digit identifier of the IWR station
+    clim_db_loc:
+    data_dir:
+    start:
+    end:
+    pivot: bool, optional; whether the field is irrgiated with a center pivot (True) or not (False)
+    """
     if clim_db_loc:
         print('Using IWR database:')
         bc, start1, end1 = iwr_database(clim_db_loc, station, fullmonth=False, pivot=pivot)
@@ -975,33 +1011,125 @@ def plot_growing_season_starts_and_ends(clim_db_loc):
     labelss = pd.date_range(start='2000-04-16', end='2000-6-18').date
 
     # Plotting
-    plt.figure()
-    plt.subplot(211)
-    plt.title('Starts')
-    plt.hist(doys, bins=binss, align='left', zorder=5)
-    plt.xticks(binss, labelss, rotation='vertical')
-    plt.grid(zorder=0)
 
-    plt.subplot(212)
-    plt.title('Ends')
-    plt.hist(doy, bins=bins, align='left', zorder=5)
-    plt.xticks(bins, labels, rotation='vertical')
-    plt.grid(zorder=0)
-    plt.tight_layout()
+    # # Start and end days
+    # plt.figure()
+    # plt.subplot(211)
+    # plt.title('Starts')
+    # plt.hist(doys, bins=binss, align='left', zorder=5)
+    # plt.xticks(binss, labelss, rotation='vertical')
+    # plt.grid(zorder=0)
+    #
+    # plt.subplot(212)
+    # plt.title('Ends')
+    # plt.hist(doy, bins=bins, align='left', zorder=5)
+    # plt.xticks(bins, labels, rotation='vertical')
+    # plt.grid(zorder=0)
+    # plt.tight_layout()
+
+    # # Start and end months
+    # plt.figure()
+    # plt.subplot(121)
+    # plt.title('Starts')
+    # counts1, edges1, bars1 = plt.hist(monthss)
+    # plt.bar_label(bars1)
+    # plt.xlabel('Month')
+    #
+    # plt.subplot(122)
+    # plt.title('Ends')
+    # counts, edges, bars = plt.hist(months)
+    # plt.bar_label(bars)
+    # plt.xlabel('Month')
+
+    # Default growing season lengths
+    lens = np.array(doy) - np.array(doys)
+    bins = np.arange(70, 190, 10)
 
     plt.figure()
-    plt.subplot(121)
-    plt.title('Starts')
-    counts1, edges1, bars1 = plt.hist(monthss)
+    plt.title('Lengths')
+    counts1, edges1, bars1 = plt.hist(lens, bins=bins)
     plt.bar_label(bars1)
-    plt.xlabel('Month')
+    plt.xlabel('Days')
 
-    plt.subplot(122)
-    plt.title('Ends')
-    counts, edges, bars = plt.hist(months)
-    plt.bar_label(bars)
-    plt.xlabel('Month')
+    # Default growing seasons
+    year = pd.date_range("01-01-2000", "12-15-2000", freq='SMS')
+    year_day = pd.date_range("01-01-2000", "12-15-2000", freq='D')
 
+    daily_kc = pd.Series(alfalfa_kc, year)
+    daily_kc = daily_kc.reindex(year_day)
+    daily_kc = daily_kc.interpolate()
+
+    ys = np.linspace(0, 1.8, 180)
+    print(starts[0])
+    starts = [i.date() for i in starts]
+    times = pd.DataFrame({'start': pd.to_datetime(starts), 'end': pd.to_datetime(end_dates), 'length': lens})
+    print(type(times['end'].iloc[0]), type(times['start'].iloc[0]))
+    print(times['end'].iloc[0], times['start'].iloc[0])
+    times['middle'] = times['start'] + (times['end'] - times['start'])/2
+    times = times.sort_values('length', ascending=False)
+    print(times)
+
+    bins = np.arange(182, 214)
+    labels = pd.date_range(start='2000-07-01', end='2000-08-01').date
+
+    plt.figure()
+    plt.title('Growing Season Midpoints')
+    counts1, edges1, bars1 = plt.hist(lens, bins=bins)
+    plt.hist(times['middle'], bins=labels, align='left', zorder=5)
+    plt.bar_label(bars1)
+    plt.xticks(rotation='vertical')
+    plt.grid(zorder=0)
+
+    # plt.figure()
+    # for i in range(180):
+    #     plt.hlines(ys[i], times['start'].iloc[i], times['end'].iloc[i])
+    # plt.scatter(times['middle'], ys, color='tab:pink')
+    # plt.vlines(times['middle'].mean(), 0, 1.8, 'tab:orange',
+    #            label='Avg GS midpoint: {}'.format(times['middle'].mean().date()))
+    # plt.fill_between([times['middle'].mean() - 2*times['middle'].std(), times['middle'].mean() + 2*times['middle'].std()],
+    #                  [0], [1.8], color='tab:orange', alpha=0.6, ec='none',
+    #                  label='+/- {}'.format(2*times['middle'].std()))
+    #                  # label="{} {}".format((times['middle'].mean() - 2*times['middle'].std()),
+    #                  #                      (times['middle'].mean() + 2*times['middle'].std())))
+    # plt.plot(daily_kc, 'k')
+    # # plt.ylabel('IWR Alfalfa KC')
+    # plt.xlabel('Month')
+    # plt.xlim(date(year=2000, month=4, day=1), date(year=2000, month=11, day=1))
+    # plt.legend()
+    # plt.grid()
+    # plt.show()
+
+    plt.show()
+
+
+def plot_kc_and_gs():
+    year = pd.date_range("01-01-2001", "12-15-2001", freq='SMS')
+    year_day = pd.date_range("01-01-2001", "12-15-2001", freq='D')
+
+    daily_kc = pd.Series(alfalfa_kc, year)
+    daily_kc = daily_kc.reindex(year_day)
+    daily_kc = daily_kc.interpolate()
+
+    plt.figure()
+    plt.plot(daily_kc)
+
+    plt.vlines(date(month=4, day=1, year=2001), 0.6, 1.2, 'tab:pink')
+    plt.vlines(date(month=9, day=30, year=2001), 0.6, 1.2, 'tab:pink')
+    plt.hlines(daily_kc.loc['04-01-2001':'09-30-2001'].mean(), date(month=4, day=1, year=2001),
+               date(month=9, day=30, year=2001), 'tab:pink',
+               label="GS Avg: {:.2f}".format(daily_kc.loc['04-01-2001':'09-30-2001'].mean()))
+
+    # # David's growing season for Park and Sweet Grass counties in memo
+    # plt.vlines(date(month=5, day=9, year=2001),0.6, 1.2, 'tab:purple')
+    # plt.vlines(date(month=9, day=19, year=2001),0.6, 1.2, 'tab:purple')
+    # plt.hlines(daily_kc.loc['05-09-2001':'09-19-2001'].mean(), date(month=5, day=9, year=2001),
+    #            date(month=9, day=19, year=2001), 'tab:purple',
+    #            label="GS Avg: {:.2f}".format(daily_kc.loc['05-09-2001':'09-19-2001'].mean()))
+
+    plt.ylabel('IWR Alfalfa KC')
+    plt.xlabel('Month')
+    plt.grid()
+    plt.legend()
     plt.show()
 
 
@@ -1025,8 +1153,10 @@ if __name__ == '__main__':
 
     # run_one_iwr_station('2409', data_dir=daily_data_dir)
 
-    run_all_iwr_stations(iwr_clim_db_loc, iwr_sum, daily_data_dir)
+    # run_all_iwr_stations(iwr_clim_db_loc, iwr_sum, daily_data_dir)
 
-    # plot_growing_season_starts_and_ends(iwr_clim_db_loc)
+    plot_growing_season_starts_and_ends(iwr_clim_db_loc)
+
+    # plot_kc_and_gs()
 
 # ========================= EOF ====================================================================

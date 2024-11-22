@@ -20,6 +20,7 @@ import json
 from pprint import pprint
 from copy import deepcopy
 
+import pandas as pd
 import requests
 from requests.compat import urlencode, OrderedDict
 from datetime import datetime
@@ -27,6 +28,9 @@ from fiona import collection
 from fiona.crs import from_epsg
 from geopy.distance import geodesic
 from pandas import read_table, to_datetime, date_range, to_numeric, DataFrame
+
+import matplotlib.pyplot as plt
+import datetime as dt
 
 STATION_INFO_URL = 'https://www.usbr.gov/pn/agrimet/agrimetmap/usbr_map.json'
 # AGRIMET_MET_REQ_SCRIPT_PN = 'https://www.usbr.gov/pn-bin/agrimet.pl' ## appears to be broken
@@ -175,7 +179,7 @@ class Agrimet(object):
         """
         distances = {}
         station_coords = {}
-        station_data = self.load_stations()
+        station_data = load_stations()
         for feat in station_data['features']:
             stn_crds = feat['geometry']['coordinates']
             stn_site_id = feat['properties']['siteid']
@@ -404,37 +408,308 @@ def load_stations():
     stations = {s['properties']['siteid']: s for s in stations}
     return stations
 
+#
+# def load_stations_1():
+#     # # Uses JSON file dowloaded from BOR website,
+#     stations = json.load(open('C:/Users/CND571/Downloads/AgriMet_station_list.json'))
+#     stations = stations['features']
+#     stations = {s['properties']['StationID']: s for s in stations}
+#     return stations
 
-def load_stations_1():
-    ## Uses JSON file dowloaded from BOR website,
-    stations = json.load(open('C:/Users/CND571/Downloads/AgriMet_station_list.json'))
-    stations = stations['features']
-    stations = {s['properties']['StationID']: s for s in stations}
-    return stations
+
+def agrimet_data(save=False):
+    """ Download Agrimet data, with option to save as csv or use as pd dataframe. """
+    ams = stn_lists(mn=False)
+    am_idx = pd.date_range("1984-01-01", end="2023-12-31", freq="D")
+    all_am = pd.DataFrame(index=am_idx, columns=ams)
+
+    stations = load_stations()
+    for i in ams:
+        # i = i.upper()
+        stn = Agrimet(station=i, region=stations[i]['properties']['StationOffice'],
+                      start_date='1984-01-01', end_date='2023-12-31')
+        data = stn.fetch_met_data()
+        data.columns = data.columns.droplevel([1, 2])
+        all_am[i] = data['ET'] / 25.4  # Kimberly-Penman ET
+
+    if save:
+        all_am.to_csv('C:/Users/CND571/Documents/Data/all_agrimet_daily_etr_in_through2023.csv')
+    else:
+        return all_am
+
+
+def mesonet_data(save=False):
+    """ Download Mesonet data, with option to save as csv or use as pd dataframe. """
+    mns = stn_lists(am=False)
+
+    mn_idx = pd.date_range("2017-01-01", end="2023-12-31", freq="D")
+    all_mn = pd.DataFrame(index=mn_idx, columns=mns)
+
+    for i in mns:
+        if i not in ['blmglsou', 'wrsround']:  # THese two do not have data available?
+            print(i)
+            mn_url = (
+                'https://mesonet.climate.umt.edu/api/v2/derived/daily/?crop=corn&high=86&low=50&alpha=0.23&'
+                'na_info=false&rm_na=false&premade=true&wide=true&keep=false&units=us&type=csv&tz=America%2FDenver&'
+                'simple_datetime=false&time=daily&end_time=2024-01-01T00%3A00%3A00&start_time=2017-01-01T00%3A00%3A00&'
+                'level=1&stations={}&elements=etr'.format(i))
+            mn_station1 = pd.read_csv(mn_url, index_col='datetime')
+            mn_station1.index = [j[:10] for j in mn_station1.index]
+            mn_station1.index = pd.to_datetime(mn_station1.index)
+            all_mn[i] = mn_station1['Reference ET (a=0.23) [in]']  # Grass reference
+
+    if save:
+        all_mn.to_csv('C:/Users/CND571/Documents/Data/all_mesonet_daily_etr_in_through2023.csv')
+    else:
+        return all_mn
+
+
+def stn_lists(am=True, mn=True, plot=False):
+    """ Return lists of station IDs for MT Agrimet and Mesonet. """
+    am_list = 0
+    mn_list = 0
+    ams = 0
+    mns = 0
+
+    if am:
+        am_list = pd.read_csv('C:/Users/CND571/Documents/Data/AgriMet_station_list.csv')
+        am_list = am_list[am_list['StationState'] == 'MT']
+        am_list['StationInstall'] = pd.to_datetime(am_list['StationInstall'])
+        ams = list(am_list['StationID'])
+    if mn:
+        mn_list = pd.read_csv('C:/Users/CND571/Documents/Data/mesonet_station_list.csv')
+        mn_list['date_installed'] = pd.to_datetime(mn_list['date_installed'])
+        mn_list = mn_list[mn_list['date_installed'] < pd.to_datetime('01/01/2021')]  # >3 years of data available
+        mns = list(mn_list['station'])
+        # Can't access data for these 2 stations?
+        mns.remove('blmglsou')
+        mns.remove('wrsround')
+
+    if am and mn:
+        if plot:  # Plot locations of Agrimet and Mesonet stations
+            close_am = ['COVM', 'CRSM', 'MWSM']
+            plt.figure()
+            plt.scatter(am_list['StationLongitude'], am_list['StationLatitude'], label='Agrimet')
+            plt.scatter(mn_list['longitude'], mn_list['latitude'], label='Mesonet')
+            for i in close_am:
+                plt.scatter(am_list[am_list['StationID'] == i]['StationLongitude'],
+                            am_list[am_list['StationID'] == i]['StationLatitude'], color='tab:green')
+            plt.legend()
+        return ams, mns
+    elif am:
+        return ams
+    elif mn:
+        return mns
+    else:
+        return 0
+
+
+def am_mn_comp_plots(am_d, mn_d, am_m, mn_m):
+    # Time series comparison of 3 pairs of "collocated" Arigmet/Mesonet stations
+    plt.figure(figsize=(15, 10))
+
+    plt.subplot(311)
+    plt.title('Corvallis')
+    plt.plot(am_d.index, am_d['COVM'], label='Agrimet')
+    plt.plot(mn_d.index, mn_d['corvalli'], label='Mesonet')
+    plt.plot(am_m.index - dt.timedelta(days=15), am_m['COVM'], label='Agrimet (Monthly)')
+    plt.plot(mn_m.index - dt.timedelta(days=15), mn_m['corvalli'], label='Mesonet (Monthly)')
+    plt.ylabel('ETr (in)')
+    # plt.xlabel('Date')
+    plt.grid()
+    plt.xlim(dt.date(year=2017, month=1, day=1), dt.date(year=2024, month=1, day=1))
+    plt.legend()
+
+    plt.subplot(312)
+    plt.title('Kalispell')
+    plt.plot(am_d.index, am_d['CRSM'], label='Agrimet')
+    plt.plot(mn_d.index, mn_d['kalispel'], label='Mesonet')
+    plt.plot(am_m.index - dt.timedelta(days=15), am_m['CRSM'], label='Agrimet (Monthly)')
+    plt.plot(mn_m.index - dt.timedelta(days=15), mn_m['kalispel'], label='Mesonet (Monthly)')
+    plt.ylabel('ETr (in)')
+    # plt.xlabel('Date')
+    plt.grid()
+    plt.xlim(dt.date(year=2017, month=1, day=1), dt.date(year=2024, month=1, day=1))
+    # plt.ylim(0, 5)
+    plt.legend()
+
+    plt.subplot(313)
+    plt.title('Moccasin')
+    plt.plot(am_d.index, am_d['MWSM'], label='Agrimet')
+    plt.plot(mn_d.index, mn_d['moccasin'], label='Mesonet')
+    plt.plot(am_m.index - dt.timedelta(days=15), am_m['MWSM'], label='Agrimet (Monthly)')
+    plt.plot(mn_m.index - dt.timedelta(days=15), mn_m['moccasin'], label='Mesonet (Monthly)')
+    plt.ylabel('ETr (in)')
+    # plt.xlabel('Date')
+    plt.grid()
+    plt.xlim(dt.date(year=2017, month=1, day=1), dt.date(year=2024, month=1, day=1))
+    plt.legend()
+
+    plt.tight_layout()
+
+    # Difference between Agrimet and Mesonet monthly averages.
+    plt.figure()
+
+    plt.subplot(211)
+    plt.hlines(1, dt.date(year=2019, month=1, day=1), dt.date(year=2024, month=1, day=1), 'k')
+    plt.plot(am_m.index - dt.timedelta(days=15), (am_m['COVM']) / mn_m['corvalli'], label='Corvallis')
+    plt.plot(am_m.index - dt.timedelta(days=15), (am_m['CRSM']) / mn_m['kalispel'], label='Kalispell')
+    plt.plot(am_m.index - dt.timedelta(days=15), (am_m['MWSM']) / mn_m['moccasin'], label='Moccasin')
+    plt.xlim(dt.date(year=2019, month=1, day=1), dt.date(year=2024, month=1, day=1))
+    plt.ylim(0, 2)
+    plt.ylabel('Agrimet/Mesonet')
+    plt.grid()
+
+    plt.subplot(212)
+    plt.hlines(0, dt.date(year=2019, month=1, day=1), dt.date(year=2024, month=1, day=1), 'k')
+    plt.plot(am_m.index - dt.timedelta(days=15), (am_m['COVM']) - mn_m['corvalli'], label='Corvallis')
+    plt.plot(am_m.index - dt.timedelta(days=15), (am_m['CRSM']) - mn_m['kalispel'], label='Kalispell')
+    plt.plot(am_m.index - dt.timedelta(days=15), (am_m['MWSM']) - mn_m['moccasin'], label='Moccasin')
+    plt.xlim(dt.date(year=2019, month=1, day=1), dt.date(year=2024, month=1, day=1))
+    plt.ylim(-0.1, 0.2)
+    plt.ylabel('Agrimet minus Mesonet (in)')
+    plt.grid()
+
+    # plt.show()
+
+
+def am_quality_plots(am_d, am_m):
+    # Time series comparison of 3 pairs of "collocated" Arigmet/Mesonet stations
+
+    for i in range(8):
+        plt.figure(figsize=(15, 12))
+        for j in range(4):
+            idx = 4*i + j
+            if idx < len(am_d.columns):
+                stn = am_d.columns[idx]
+                plt.subplot(4, 1, j+1)
+                plt.title(stn)
+                plt.plot(am_d.index, am_d[stn], label='Agrimet')
+                plt.plot(am_m.index - dt.timedelta(days=15), am_m[stn], label='Agrimet (Monthly)')
+                plt.ylabel('ETr (in)')
+                plt.grid()
+                # plt.xlim(dt.date(year=2017, month=1, day=1), dt.date(year=2024, month=1, day=1))
+                if j == 0:
+                    plt.legend()
+                print("{}: {:.1f}% of {:.1f} years of data".format(stn, 100 * am_d[stn].count() / len(am_d[stn][am_d[stn].first_valid_index():]), len(am_d[stn][am_d[stn].first_valid_index():]) / 365))
+                # print(stn, ":", (am_d[stn] > 1).sum(), am_d[stn].count(),
+                #       "{:.1f}%".format(100*(am_d[stn] > 1).sum()/am_d[stn].count()))
+        plt.tight_layout()
+
+
+def mn_quality_plots(mn_d, mn_m):
+    # Time series comparison of 3 pairs of "collocated" Arigmet/Mesonet stations
+
+    for i in range(9):
+        plt.figure(figsize=(15, 12))
+        for j in range(8):
+            idx = 8*i + j
+            if idx < len(mn_d.columns):
+                stn = mn_d.columns[idx]
+                plt.subplot(4, 2, j+1)
+                plt.title(stn)
+                plt.plot(mn_d.index, mn_d[stn], label='Mesonet')
+                plt.plot(mn_m.index - dt.timedelta(days=15), mn_m[stn], label='Mesonet (Monthly)')
+                if j % 2 == 0:
+                    plt.ylabel('ETr (in)')
+                plt.grid()
+                # plt.xlim(dt.date(year=2017, month=1, day=1), dt.date(year=2024, month=1, day=1))
+                if j == 1:
+                    plt.legend()
+                print("{}: {:.1f}% of {:.1f} years of data".format(stn, 100 * mn_d[stn].count() / len(mn_d[stn][mn_d[stn].first_valid_index():]), len(mn_d[stn][mn_d[stn].first_valid_index():]) / 365))
+        plt.tight_layout()
 
 
 if __name__ == '__main__':
+
+    # Investigating differences between different station metadata sources. (PN region vs GP region.)
     stations = load_stations()
-    sid = 'bfam'
-    print(stations[sid])
-    bfam = Agrimet(station=sid, region=stations[sid]['properties']['region'],
-                   start_date='2000-01-01', end_date='2023-12-31')
-    data = bfam.fetch_met_data()
-    # print(data)
-    data.columns = data.columns.droplevel([1,2])
-    print(data)
+    print(len(stations))
+    print(stations.keys())
+    print(stations['abei'])
+    # stations1 = load_stations()
+    # print(len(stations1))
+    # print(stations1.keys())
+    # print(stations1['AFTY'])
+    # for k in stations1.keys():
+    #     k = k.lower()
+    #     if k not in stations.keys():
+    #         print("Oh no! {}".format(k))
 
-    stations1 = load_stations_1()
+    mt = 0
+    other = 0
+    for k in stations.keys():
+        if stations[k]['properties']['state'] == 'MT':
+            mt += 1
+        else:
+            other += 1
+        # print(stations[k]['properties']['state'])
+    print('Old one: {} MT and {} other'.format(mt, other))
 
-    sid = 'bfam'.upper()
-    print(stations1[sid])
-    bfam = Agrimet(station=sid, region=stations1[sid]['properties']['StationOffice'],
-                   start_date='2000-01-01', end_date='2023-12-31')
-    data = bfam.fetch_met_data()
-    # print(data)
-    data.columns = data.columns.droplevel([1, 2])
-    print(data)
+    # mt = 0
+    # other = 0
+    # for k in stations1.keys():
+    #     if stations1[k]['properties']['StationState'] == 'MT':
+    #         mt += 1
+    #     else:
+    #         other += 1
+    #     # print(stations[k]['properties']['state'])
+    # print('New one: {} MT and {} other'.format(mt, other))
 
-    pass
+    mt_st = {i for i in stations.keys() if stations[i]['properties']['state'] == 'MT'}
+    # mt_st1 = {i.lower() for i in stations1.keys() if stations1[i]['properties']['StationState'] == 'MT'}
+    print(mt_st)
+    # print(mt_st1)
+    # print("{} overlapping stations".format(len(mt_st.intersection(mt_st1))))
+    # print("Only in PN", mt_st.difference(mt_st1))  # New in GP region in 2019, except bomt (removed in 2000).
+    # print("Only in GP", mt_st1.difference(mt_st))  # New in PN region since 2015.
+
+    # Why is there such a big difference between these two sets of stations?
+    # PN region and GP region have different station directories!!! WHY?!
+
+    # Finding average length of period of record for Agrimet stations
+
+    # installs = pd.DataFrame(stations.keys(), columns=['ID'])
+    # i = 0
+    # for k in stations.keys():
+    #     install = stations[k]['properties']['StationInstall']
+    #     if len(install) > 0:
+    #         installs.at[i, 'Install'] = dt.datetime.strptime(install, '%m/%d/%Y')
+    #         installs.at[i, 'POR'] = dt.date.today() - installs.at[i, 'Install'].date()
+    #     i += 1
+    # print(installs)
+    # print(installs['POR'].mean())
+    # print(8819 / 365)  # 24 years on 7/22/24
+    #
+    # # # Loading data
+    # # agrimet_data(save=True)
+    # am_data = pd.read_csv('C:/Users/CND571/Documents/Data/all_agrimet_daily_etr_in_through2023.csv',
+    #                       index_col='Unnamed: 0')
+    # am_data.index = pd.to_datetime(am_data.index)
+    # am_data = am_data.mask(am_data > 1)  # data values greater than 1 assumed to be errors. Not many at most stations.
+    # # Highest incident of erroneously high ETr values was VLMT with 3.8% (3.5/9 years affected)
+    # # Some stations still afected by noisy/missing data, but these are also often isolated years,
+    # # and can be removed later if desired.
+    # # print(am_data)
+    #
+    # # mesonet_data(save=True)
+    # mn_data = pd.read_csv('C:/Users/CND571/Documents/Data/all_mesonet_daily_etr_in_through2023.csv',
+    #                       index_col='Unnamed: 0')
+    # mn_data.index = pd.to_datetime(mn_data.index)
+    # # Mesonet has a lot shorter period of record (earliest start date is 2017?), and much more missing data.
+    # # print(mn_data)
+    #
+    # # Monthly averages
+    # am_mnth = am_data.resample('ME').mean()
+    # mn_mnth = mn_data.resample('ME').mean()
+    #
+    # # # Comparison of 3 pairs of "collocated" Arigmet/Mesonet stations
+    # am_mn_comp_plots(am_data, mn_data, am_mnth, mn_mnth)
+    #
+    # # Data quality checking
+    # # am_quality_plots(am_data, am_mnth)
+    # # mn_quality_plots(mn_data, mn_mnth)
+    #
+    # plt.show()
 
 # ========================= EOF ====================================================================

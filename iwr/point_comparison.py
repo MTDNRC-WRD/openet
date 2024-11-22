@@ -6,10 +6,11 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
+# import seaborn as sns
 from shapely.geometry import Point, MultiPolygon
 from pypxlib import Table
 from tqdm import tqdm
+from chmdata.thredds import GridMet
 
 from reference_et.combination import pm_fao56, get_rn
 from reference_et.modified_bcriddle import modified_blaney_criddle
@@ -20,7 +21,7 @@ from utils.agrimet import load_stations
 from utils.agrimet import Agrimet
 from utils.agrimet import MT_STATIONS
 from utils.elevation import elevation_from_coordinate
-from utils.thredds import GridMet
+# from utils.thredds import GridMet
 
 import requests
 
@@ -49,7 +50,7 @@ params = {'axes.titlesize': large,
 plt.rcParams.update(params)
 # print(plt.style.available)
 plt.style.use('seaborn-v0_8-whitegrid')
-sns.set_style("white", {'axes.linewidth': 0.5})
+# sns.set_style("white", {'axes.linewidth': 0.5})
 
 
 def openet_get_fields(fields, start, end, et_too=False,
@@ -316,15 +317,15 @@ def point_comparison_agrimet(station_dir, out_figs, out_shp):
         #                  header=0, skiprows=[1, 2, 3]) ## removed infer_datetime_format
         # load from website instead:
         df = Agrimet(station=sid, region=stations[sid]['properties']['region'],
-                   start_date='2000-01-01', end_date='2023-12-31').fetch_met_data() ## correct daterange?
-        df.columns = df.columns.droplevel([1, 2]) ## remove multiindex
+                     start_date='2000-01-01', end_date='2023-12-31').fetch_met_data()  # correct daterange?
+        df.columns = df.columns.droplevel([1, 2])  # remove multiindex
 
         tmean, tmax, tmin, wind, rs, rh = df['MM'], df['MX'], df['MN'], df['UA'], df['SR'], df['TA']
         ra = extraterrestrial_r(df.index, lat=coord_rads[1], shape=[df.shape[0]])
         rso = calc_rso(ra, elev)
         rn = get_rn(tmean, rs=rs, lat=coord_rads[1], tmax=tmax, tmin=tmin, rh=rh, elevation=elev, rso=rso)
         df['ETOS'] = pm_fao56(tmean, wind, rs=rs, tmax=tmax, tmin=tmin, rh=rh, elevation=elev, rn=rn)
-        df['ETRS'] = df['ETOS'] * 1.2
+        df['ETRS'] = df['ETOS'] * 1.2  # What's the basis for this?
 
         try:
             bc, start, end, kc = modified_blaney_criddle(df, coords[1], elev, mid_month=True)
@@ -638,7 +639,7 @@ if __name__ == '__main__':
     iwr_data_dir = os.path.join(d, 'from_ghcn')
     stations = os.path.join(d, 'mt_arm_iwr_stations.csv')
     comp = os.path.join(d, 'iwr_gridmet_comparison.shp')
-    # point_comparison_iwr_stations(iwr_data_dir, stations, comp)
+    point_comparison_iwr_stations(iwr_data_dir, stations, comp)
 
     _dir = os.path.join(d, 'agrimet/mt_stations')
     fig_dir = os.path.join(d, 'agrimet/comparison_figures')

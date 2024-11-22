@@ -15,14 +15,18 @@ SPLIT = ['047', '111', '099', '081', '073', '105', '031', '049', '067', '097']
 def openet_get_fields_export(fields, start, end, et_too=False,
                              api_key='C:/Users/CND571/Documents/Haugen_Montana_API.txt'):
     """ Uses OpenET API multipolygon export endpoint to get etof data given a Google Earth Engine asset.
+
     Files will be exported to user's Google Drive; this is dependent on linking OpenET account to a Google account
     (I think).
 
-    :fields: path to gee asset, form of 'projects/cloud_project/assets/asset_filename'
-    :start: beginning of period of study, 'YYYY-MM-DD' format
-    :end: end of period of study, 'YYYY-MM-DD' format
-    :et_too: if True, also download OpenET ensemble ET over same time period and set of fields
-    :api_key: path to local .txt file where API key from user's OpenET account is stored. Key is first line in file.
+    Parameters
+    ----------
+    fields: path to gee asset, form of 'projects/cloud_project/assets/asset_filename'
+    start: beginning of period of study, 'YYYY-MM-DD' format
+    end: end of period of study, 'YYYY-MM-DD' format
+    et_too: bool, optional; if True, also download OpenET ensemble ET over same time period and set of fields
+    api_key: str, optional; path to local .txt file where API key from user's OpenET account is stored.
+    Key is first line in file.
     """
 
     # Use earth engine and gsutil to upload shapefiles to earth engine and then download resulting files from bucket.
@@ -104,6 +108,8 @@ def rename_etof_downloads(path):
     first year in timeseries, and last year in time series. Also handles the large counties with split fields/2-part
     gee assets. This will break once it has successfully been run through.
 
+    Parameters
+    ----------
     path: str, specifies local directory where all etof files are stored.
     """
     # first = {i: True for i in SPLIT}
@@ -137,6 +143,8 @@ def concat_etof(path, goal_yr_start=1985, goal_yr_end=2023):
     cause errors/confusion if split counties haven't had all field sets run and data downloaded in all relevant
     time periods.
 
+    Parameters
+    ----------
     path: str, local directory where etof files are stored.
     goal_yr_start: int, optional, the desired start year for the total period of record.
     goal_yr_end: int, optional, the desired end year for the total period of record.
@@ -164,6 +172,12 @@ def concat_etof(path, goal_yr_start=1985, goal_yr_end=2023):
 
 def check_etof_data(counties, etof_dir, plot=False):
     """ To be used after openet_get_fields_export to check data quality, and before loading any data into db files.
+
+    Parameters
+    ----------
+    counties:
+    etof_dir: str, path to local directory where etof data files are stored
+    plot: bool, optional; produces plots if True
     """
     bad_counties = 0
     # for i in counties:
@@ -292,6 +306,12 @@ def check_etof_data(counties, etof_dir, plot=False):
 def check_etof_data_concat(counties, etof_dir, plot=False):
     """ To be used after openet_get_fields_export and concat__etof to check data quality, and before loading
     any data into db files.
+
+    Parameters
+    ----------
+    counties:
+    etof_dir: str, path to local directory where etof data files are stored
+    plot: bool, optional; produces plots if True
     """
     bad_counties = 0
     # for i in counties:
@@ -410,5 +430,10 @@ if __name__ == '__main__':
         COUNTIES.pop(key, None)
     cnty = list(COUNTIES.keys())
     # cnty = ['049', '067', '097']  # subset
-    check_etof_data_concat(cnty, path_, True)
+    # check_etof_data_concat(cnty, path_, True)
+
+    # # Temp to get things to compare.
+    # start, end = "2005-01-01", "2005-12-31"
+    # gee_asset_1 = 'projects/ee-hehaugen/assets/SID_15FEB2024/033'
+    # openet_get_fields_export(gee_asset_1, start, end)
 # ========================= EOF ====================================================================

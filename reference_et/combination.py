@@ -753,4 +753,15 @@ def get_rn(tmean, rs=None, lat=None, n=None, nn=None, tmax=None, tmin=None,
                         rso=rso, a=a, b=b, ea=ea, kab=kab, tindex=tindex,
                         shape=shape)  # [MJ/m2/d]
     rn = rns - rnl
+    # rn = rns
+    # # print("rns", rns)
+    # # print("rnl", rnl)
+    # import matplotlib.pyplot as plt
+    # plt.figure()
+    # plt.plot(rs, label='rs')
+    # plt.plot(rso, label='rso')
+    # plt.plot(rns, label='rns')
+    # plt.plot(rnl, label='rnl')
+    # plt.plot(rn, label='rn')
+    # plt.legend()
     return rn

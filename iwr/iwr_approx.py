@@ -25,22 +25,28 @@ alfalfa_kc = [0.6, 0.63, 0.68, 0.73, 0.79, 0.86, 0.92, 0.98, 1.04, 1.08, 1.12, 1
               1.12, 1.11, 1.09, 1.06, 1.03, 0.99, 0.95, 0.91, 0.85, 0.78, 0.72, 0.64]
 
 
-def effective_ppt_table():
+def effective_ppt_table(loc=None):
     """ Load effective precip table from file.
 
     From National Engineering Handbook (NEH) Ch 2, pg 148, Table 2-43.
+
+    Parameters
+    ----------
+    loc: str, optional; full filepath to effective precip table stored as csv.
 
     Returns
     -------
     pandas DataFrame of effective precipitation table.
     """
-
-    if os.path.exists('F:/FileShare'):
-        main_dir = 'F:/FileShare/openet_pilot'
+    if loc:
+        return pd.read_csv(loc, index_col=0)
     else:
-        main_dir = 'F:/openet_pilot'
-    _file = os.path.join(main_dir, 'eff_precip_neh_chap2.csv')
-    return pd.read_csv(_file, index_col=0)
+        if os.path.exists('F:/FileShare'):
+            main_dir = 'F:/FileShare/openet_pilot'
+        else:
+            main_dir = 'F:/openet_pilot'
+        _file = os.path.join(main_dir, 'eff_precip_neh_chap2.csv')
+        return pd.read_csv(_file, index_col=0)
 
 
 def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):

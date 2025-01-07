@@ -19,6 +19,12 @@ from rasterstats import zonal_stats
 from chmdata.thredds import GridMet
 from scipy.stats import linregress
 
+# For density plots
+# from matplotlib import cm
+from matplotlib.colors import Normalize
+from scipy.interpolate import interpn
+import matplotlib as mpl
+
 from reference_et.combination import calc_press, calc_psy, calc_vpc, calc_ea, calc_es, get_rn, calc_e0
 from utils.agrimet import load_stations, Agrimet
 from utils.elevation import elevation_from_coordinate
@@ -63,6 +69,17 @@ def calc_qsat(tmean, pres):
     # qs = (ep * es) / pres  # Estimation?
     qs = (ep * es) / (pres - es * (1 - ep))  # more precise? g/kg
     return qs
+
+
+def calculate_vpd_temponly(t_min, t_max):
+    """ Calculate vapor pressure deficit using only max and min temp in Celsius. """
+    etmin = 0.6108 * np.exp((17.27 * t_min) / (t_min + 237.3))
+    etmax = 0.6108 * np.exp((17.27 * t_max) / (t_max + 237.3))
+    es = (etmax + etmin) / 2.0
+    ea = etmin
+    vpd = es - ea
+
+    return vpd
 
 
 def pm_fao56_ref(tmean, wind, rs=None, rn=None, g=0, tmax=None, tmin=None,
@@ -149,9 +166,16 @@ def pm_fao56_ref(tmean, wind, rs=None, rn=None, g=0, tmax=None, tmin=None,
 
     gamma1 = (gamma * (1 + cd * wind))
 
-    ea = calc_ea(tmean=tmean, tmax=tmax, tmin=tmin, rhmax=rhmax, rhmin=rhmin,
-                 rh=rh)
-    es = calc_es(tmean=tmean, tmax=tmax, tmin=tmin)
+    if (rhmax is None) and (rhmin is None) and (rh is None):
+        # from https://github.com/MTDNRC-WRD/pydlem/blob/main/prep/metdata.py#L194
+        etmin = 0.6108 * np.exp((17.27 * tmin) / (tmin + 237.3))
+        etmax = 0.6108 * np.exp((17.27 * tmax) / (tmax + 237.3))
+        es = (etmax + etmin) / 2.0
+        ea = etmin
+    else:
+        ea = calc_ea(tmean=tmean, tmax=tmax, tmin=tmin, rhmax=rhmax, rhmin=rhmin,
+                     rh=rh)
+        es = calc_es(tmean=tmean, tmax=tmax, tmin=tmin)
 
     if rn is None:
         rn = get_rn(tmean, rs, lat, n, nn, tmax, tmin, rhmax, rhmin, rh,
@@ -182,7 +206,7 @@ def agrimet_data(stn, save=False):
 
     # Get elevation
     coords = stations[stn]['geometry']['coordinates']
-    geo = Point(coords)
+    # geo = Point(coords)
     coord_rads = np.array(coords) * np.pi / 180
     elev = elevation_from_coordinate(coords[1], coords[0])
 
@@ -277,7 +301,8 @@ def era5_v_nldas():
     era5[eta] = ds3.e.sel(longitude=lon, latitude=lat, method='nearest')
     era5[et] = era5.index.daysinmonth * np.abs(era5[et]) * (1000 / 25.4)  # m/day to in/month
     era5[eta] = era5.index.daysinmonth * np.abs(era5[eta]) * (1000 / 25.4)  # m/day to in/month
-    nldas[pet] = pd.Series(nldas_nc.variables['PotEvap'][:-5, lat_idx, lon_idx], index=nldas.index) / 25.4  # mm/month to in/month
+    nldas[pet] = pd.Series(nldas_nc.variables['PotEvap'][:-5, lat_idx, lon_idx],
+                           index=nldas.index) / 25.4  # mm/month to in/month
     # plt.figure()
     # plt.plot(era5[et], label='ERA5')
     # plt.plot(nldas[pet], label='NLDAS')
@@ -341,7 +366,7 @@ def era5_v_nldas():
 
     # net radiation
     rnl_e = - ds2.str.sel(longitude=lon, latitude=lat,
-                          method='nearest').to_series() / 1e6  # Jm-2d-1 to MJm-2d-1, correct for positive downwards convention
+                          method='nearest').to_series() / 1e6  # Jm-2d-1 to MJm-2d-1, correct for pos downwards convention
     rs_e = ds2.ssrd.sel(longitude=lon, latitude=lat,
                         method='nearest').to_series() / 1e6  # Jm-2d-1 to MJm-2d-1 Not sure this is the right variable
     rnl_e.index = rnl_e.index + dt.timedelta(hours=6)
@@ -444,7 +469,7 @@ def era5_data(save=False):
         wind = wind_2m(wind, 10)
         # plt.plot(wind, label='{} wind 2'.format(i))
         rnl = - ds2.str.sel(longitude=lon, latitude=lat, method='nearest').to_series() / 1e6  # Jm-2d-1 to MJm-2d-1, correct for positive downwards convention
-        rs = ds2.ssrd.sel(longitude=lon, latitude=lat, method='nearest').to_series() / 1e6 # Jm-2d-1 to MJm-2d-1 Not sure this is the right variable
+        rs = ds2.ssrd.sel(longitude=lon, latitude=lat, method='nearest').to_series() / 1e6  # Jm-2d-1 to MJm-2d-1 Not sure this is the right variable
         rnl.index = rnl.index + dt.timedelta(hours=6)
         rs.index = rs.index + dt.timedelta(hours=6)
         # Calculate relative humidity from dew point and temp:
@@ -520,7 +545,7 @@ def era5_all_data(all_data):
         wind = wind_2m(wind, 10)
         # plt.plot(wind, label='{} wind 2'.format(i))
         rnl = - ds2.str.sel(longitude=lon, latitude=lat, method='nearest').to_series() / 1e6  # Jm-2d-1 to MJm-2d-1, correct for positive downwards convention
-        rs = ds2.ssrd.sel(longitude=lon, latitude=lat, method='nearest').to_series() / 1e6 # Jm-2d-1 to MJm-2d-1 Not sure this is the right variable
+        rs = ds2.ssrd.sel(longitude=lon, latitude=lat, method='nearest').to_series() / 1e6  # Jm-2d-1 to MJm-2d-1 Not sure this is the right variable
         rnl.index = rnl.index + dt.timedelta(hours=6)
         rs.index = rs.index + dt.timedelta(hours=6)
         # Calculate relative humidity from dew point and temp:
@@ -761,8 +786,10 @@ def am_mn_comp_plots(am_d, mn_d, am_m, mn_m, era5_m, gm_m, nldas_m, am_err=None,
     # plt.plot(mn_d['corvalli'].index, mn_d['corvalli'], label='Mesonet ETo')
     # plt.plot(am_m['COVM'].index - dt.timedelta(days=15), am_m['COVM']['ETkp'], label='AgriMet ETkp (Monthly)')
 
-    plt.plot(am_m['COVM'].index - dt.timedelta(days=15), am_m['COVM'].index.daysinmonth * am_m['COVM']['ETo'], label='AgriMet')
-    plt.plot(mn_m['corvalli'].index - dt.timedelta(days=15), mn_m['corvalli'].index.daysinmonth * mn_m['corvalli']['ETo'], label='Mesonet')
+    plt.plot(am_m['COVM'].index - dt.timedelta(days=15),
+             am_m['COVM'].index.daysinmonth * am_m['COVM']['ETo'], label='AgriMet')
+    plt.plot(mn_m['corvalli'].index - dt.timedelta(days=15),
+             mn_m['corvalli'].index.daysinmonth * mn_m['corvalli']['ETo'], label='Mesonet')
     # plt.plot(am_m['COVM'].index - dt.timedelta(days=15), am_m['COVM']['ETo'], label='AgriMet')
     # plt.plot(mn_m['corvalli'].index - dt.timedelta(days=15), mn_m['corvalli']['ETo'], label='Mesonet')
 
@@ -825,8 +852,10 @@ def am_mn_comp_plots(am_d, mn_d, am_m, mn_m, era5_m, gm_m, nldas_m, am_err=None,
     # plt.plot(mn_d['moccasin'].index, mn_d['moccasin'], label='Mesonet ETo')
     # plt.plot(am_m['MWSM'].index - dt.timedelta(days=15), am_m['MWSM']['ETkp'], label='AgriMet ETkp (Monthly)')
 
-    plt.plot(am_m['MWSM'].index - dt.timedelta(days=15), am_m['MWSM'].index.daysinmonth * am_m['MWSM']['ETo'], label='AgriMet')
-    plt.plot(mn_m['moccasin'].index - dt.timedelta(days=15), mn_m['moccasin'].index.daysinmonth * mn_m['moccasin']['ETo'], label='Mesonet')
+    plt.plot(am_m['MWSM'].index - dt.timedelta(days=15),
+             am_m['MWSM'].index.daysinmonth * am_m['MWSM']['ETo'], label='AgriMet')
+    plt.plot(mn_m['moccasin'].index - dt.timedelta(days=15),
+             mn_m['moccasin'].index.daysinmonth * mn_m['moccasin']['ETo'], label='Mesonet')
     # plt.plot(am_m['MWSM'].index - dt.timedelta(days=15), am_m['MWSM']['ETo'], label='AgriMet')
     # plt.plot(mn_m['moccasin'].index - dt.timedelta(days=15), mn_m['moccasin']['ETo'], label='Mesonet')
 
@@ -859,9 +888,12 @@ def am_mn_comp_plots(am_d, mn_d, am_m, mn_m, era5_m, gm_m, nldas_m, am_err=None,
     # plt.subplot(211)
     # plt.title('ETkp vs ETo')
     # plt.hlines(1, dt.date(year=2019, month=1, day=1), dt.date(year=2024, month=1, day=1), 'k')
-    # plt.plot(am_m['COVM'].index - dt.timedelta(days=15), (am_m['COVM']['ETkp']) / mn_m['corvalli']['ETo'], label='Corvallis')
-    # plt.plot(am_m['CRSM'].index - dt.timedelta(days=15), (am_m['CRSM']['ETkp']) / mn_m['kalispel']['ETo'], label='Kalispell')
-    # plt.plot(am_m['MWSM'].index - dt.timedelta(days=15), (am_m['MWSM']['ETkp']) / mn_m['moccasin']['ETo'], label='Moccasin')
+    # plt.plot(am_m['COVM'].index - dt.timedelta(days=15),
+    #          (am_m['COVM']['ETkp']) / mn_m['corvalli']['ETo'], label='Corvallis')
+    # plt.plot(am_m['CRSM'].index - dt.timedelta(days=15),
+    #          (am_m['CRSM']['ETkp']) / mn_m['kalispel']['ETo'], label='Kalispell')
+    # plt.plot(am_m['MWSM'].index - dt.timedelta(days=15),
+    #          (am_m['MWSM']['ETkp']) / mn_m['moccasin']['ETo'], label='Moccasin')
     # plt.xlim(dt.date(year=2019, month=1, day=1), dt.date(year=2024, month=1, day=1))
     # plt.ylim(0, 2)
     # plt.ylabel('AgriMet/Mesonet')
@@ -869,9 +901,12 @@ def am_mn_comp_plots(am_d, mn_d, am_m, mn_m, era5_m, gm_m, nldas_m, am_err=None,
     #
     # plt.subplot(212)
     # plt.hlines(0, dt.date(year=2019, month=1, day=1), dt.date(year=2024, month=1, day=1), 'k')
-    # plt.plot(am_m['COVM'].index - dt.timedelta(days=15), (am_m['COVM']['ETkp']) - mn_m['corvalli']['ETo'], label='Corvallis')
-    # plt.plot(am_m['CRSM'].index - dt.timedelta(days=15), (am_m['CRSM']['ETkp']) - mn_m['kalispel']['ETo'], label='Kalispell')
-    # plt.plot(am_m['MWSM'].index - dt.timedelta(days=15), (am_m['MWSM']['ETkp']) - mn_m['moccasin']['ETo'], label='Moccasin')
+    # plt.plot(am_m['COVM'].index - dt.timedelta(days=15),
+    #          (am_m['COVM']['ETkp']) - mn_m['corvalli']['ETo'], label='Corvallis')
+    # plt.plot(am_m['CRSM'].index - dt.timedelta(days=15),
+    #          (am_m['CRSM']['ETkp']) - mn_m['kalispel']['ETo'], label='Kalispell')
+    # plt.plot(am_m['MWSM'].index - dt.timedelta(days=15),
+    #          (am_m['MWSM']['ETkp']) - mn_m['moccasin']['ETo'], label='Moccasin')
     # plt.xlim(dt.date(year=2019, month=1, day=1), dt.date(year=2024, month=1, day=1))
     # plt.ylim(-0.1, 0.2)
     # plt.ylabel('AgriMet minus Mesonet (in)')
@@ -1144,17 +1179,450 @@ def download_all_data():
     print(all_data)
 
 
+def gridmet_match(con, fields, gridmet_points, fields_join):
+    """
+    Match each input field centroid with closest gridmet pixel centroid and update sqlite database table.
+
+    This depends on running 'Raster Pixels to Points' on a WGS Gridmet raster,
+     attributing GFID, lat, and lon in the attribute table, and saving to project crs: 5071.
+     GFID is an arbitrary identifier e.g., @row_number. It further depends on projecting the
+     rasters to EPSG:5071, using the project.sh bash script (or gis)
+
+     The reason we're not just doing a zonal stat on correction surface for every object is that
+     there may be many fields that only need data from one gridmet cell. This prevents us from downloading
+     many redundant data sets. Looks like it often works out to roughly 1 gridmet data pull for every 10 fields.
+
+     :con: sqlite database connection
+     :fields: filepath, shapefile containing field geometries and unique field ids with county identifier
+     :gridmet_points: filepath, shapefile of gridmet pixel centroids
+     :fields_join: str, name of table in sqlite database containing field/gridmet lookup
+     """
+
+    def convert_to_wgs84(x, y):
+        return pyproj.Transformer.from_crs('EPSG:4326', 'EPSG:5071').transform(x, y)
+
+    # fields = gpd.read_file(fields)
+    # print('Finding field-gridmet joins for {} fields'.format(len(fields)))
+
+    gridmet_pts = gpd.read_file(gridmet_points)
+    # print(gridmet_pts.crs)
+
+    existing_fields = pd.read_sql("SELECT DISTINCT gfid FROM {}".format(fields_join), con)
+    # print(existing_fields)
+    fields['gfid'] = np.nan
+    fields['in_db'] = False
+    # and run matching algorithm
+    for i, field in fields.iterrows():
+        geometry = Point(convert_to_wgs84(field['lat'], field['lon']))
+        close_points = gridmet_pts.sindex.nearest(geometry)
+        closest_fid = gridmet_pts.iloc[close_points[1]]['GFID'].iloc[0]
+        fields.at[i, 'gfid'] = closest_fid
+        # print('Matched {} to {}'.format(field['id'], closest_fid))
+        if closest_fid in existing_fields.values:
+            fields.at[i, 'in_db'] = True
+        # g = GridMet('elev', lat=lat, lon=lon)
+        # elev = g.get_point_elevation()
+        # fields.at[i, 'elev_gm'] = elev
+    print('Found {} gridmet target points for {} new fields'.format(len(fields['gfid'].unique()),
+                                                                    fields.shape[0]))
+    print()
+    return fields
+
+
+def density_scatter(x, y, ax=None, sort=True, bins=20, **kwargs):
+    """ Scatter plot colored by 2d histogram.
+    Function from Guillaume's answer at
+    https://stackoverflow.com/questions/20105364/how-can-i-make-a-scatter-plot-colored-by-density.
+    """
+    if ax is None:
+        fig, ax = plt.subplots()
+    data_e, x_e, y_e = np.histogram2d(x, y, bins=bins, density=True)
+    z = interpn((0.5 * (x_e[1:] + x_e[:-1]), 0.5 * (y_e[1:] + y_e[:-1])), data_e, np.vstack([x, y]).T,
+                method="splinef2d", bounds_error=False)
+
+    # To be sure to plot all data
+    z[np.where(np.isnan(z))] = 0.0
+
+    # Sort the points by density, so that the densest points are plotted last
+    if sort:
+        idx = z.argsort()
+        x, y, z = x[idx], y[idx], z[idx]
+
+    ax.scatter(x, y, c=z, **kwargs)
+
+    norm = Normalize(vmin=np.min(z), vmax=np.max(z))
+    # cbar = fig.colorbar(cm.ScalarMappable(norm=norm), ax=ax)
+    # cbar.ax.set_ylabel('Density')
+
+    return ax
+
+
+def livneh_stuff(stns, am_metadata=None):
+
+    # TODO: add station data!
+    # I've only been looking at GridMET and Livneh.
+
+    livneh = pd.read_csv('C:/Users/CND571/Documents/Data/livneh_25_agrimet_allyears_20241122.csv',
+                         index_col='Unnamed: 0')
+    livneh.index = pd.to_datetime(livneh.index)
+    # livneh = livneh.reindex(sorted(livneh.columns), axis=1)
+    # print(livneh.filter(regex='^bfam').columns)
+    # print(livneh)
+
+    # # Analyzing daily swings in temperature (magnitude and timing, livneh data)
+    # bigswings = []
+    # smallswings = []
+    # for i in old_stns:
+    #     livneh['{}_flux'.format(i)] = livneh['{}_Tmax'.format(i)] - livneh['{}_Tmin'.format(i)]
+    #     print("{} {:.2f} {:.2f}".format(i, livneh['{}_flux'.format(i)].max(),
+    #                                     livneh['{}_flux'.format(i)].min()))
+    #     print("{} {} {}".format(i, livneh.index[livneh['{}_flux'.format(i)].argmax()],
+    #                             livneh.index[livneh['{}_flux'.format(i)].argmin()]))
+    #     bigswings.append(pd.to_datetime(livneh.index[livneh['{}_flux'.format(i)].argmax()]))
+    #     smallswings.append(pd.to_datetime(livneh.index[livneh['{}_flux'.format(i)].argmin()]))
+    # bigswings_d = [x.month for x in bigswings]
+    # smallswings_d = [x.month for x in smallswings]
+    # plt.figure()
+    # plt.subplot(121)
+    # plt.title("Big Swings")
+    # plt.hist(bigswings_d, bins=np.arange(14))
+    # plt.subplot(122)
+    # plt.title("Small Swings")
+    # plt.hist(smallswings_d, bins=np.arange(14))
+
+    # controlling plot features for different variables
+    thing = 2  # <--- change this, the rest will follow.
+    names = ['eto', 'Tmax', 'Tmin']
+    units = ['mm', 'C', 'C']
+    lims = [[0, 10], [-30, 40], [-40, 25]]
+    bar_lims = [4500, 4250, 6500]
+    steps = [0.5, 5, 5]
+    clrs = ['tab:green', 'tab:red', 'tab:blue']
+    clrmps = ['viridis', 'plasma', 'ocean']
+
+    livneh1 = livneh.dropna()
+
+    # plt.figure()
+    # for i in range(24):
+    #     plt.subplot(4, 6, i+1)
+    #     plt.title(old_stns[i])
+    #     plt.scatter(livneh['{}_{}_gm'.format(old_stns[i], names[thing])],
+    #                 livneh['{}_{}'.format(old_stns[i], names[thing])], zorder=3, s=2, color=clrs[thing])
+    #     # # Max and min
+    #     # print(old_stns[i], 'gm', livneh['{}_{}_gm'.format(old_stns[i], thing)].max(),
+    #     #       livneh['{}_{}_gm'.format(old_stns[i], thing)].min())
+    #     # print(old_stns[i], 'ln', livneh['{}_{}'.format(old_stns[i], thing)].max(),
+    #     #       livneh['{}_{}'.format(old_stns[i], thing)].min())
+    #     # # Range
+    #     # print(old_stns[i], 'gm', livneh['{}_{}_gm'.format(old_stns[i], thing)].max()
+    #     #       - livneh['{}_{}_gm'.format(old_stns[i], thing)].min())
+    #     # print(old_stns[i], 'ln', livneh['{}_{}'.format(old_stns[i], thing)].max()
+    #     #       - livneh['{}_{}'.format(old_stns[i], thing)].min())
+    #
+    #     # Linear regression for slope and r^2
+    #     res1 = linregress(livneh1['{}_{}_gm'.format(old_stns[i], names[thing])],
+    #                       livneh1['{}_{}'.format(old_stns[i], names[thing])])
+    #     plt.plot(lims[thing], res1.intercept + res1.slope * np.asarray(lims[thing]),
+    #              label='m:{:.2f} r^2:{:.2f}'.format(res1.slope, res1.rvalue ** 2), color='tab:gray', zorder=5)
+    #
+    #     plt.grid(zorder=1)
+    #     plt.legend()
+    #     plt.xlim(lims[thing][0], lims[thing][1])
+    #     plt.ylim(lims[thing][0], lims[thing][1])
+    #     plt.plot(lims[thing], lims[thing], 'k', zorder=4)
+    #
+    #     if i % 6 == 0:
+    #         plt.ylabel('livneh {} [{}]'.format(names[thing], units[thing]))
+    #     if i//6 == 3:
+    #         plt.xlabel('gridmet {} [{}]'.format(names[thing], units[thing]))
+
+    # # Histograms of livneh data
+    # plt.figure()
+    # for i in range(24):
+    #     plt.subplot(4, 6, i+1)
+    #     plt.title(old_stns[i])
+    #     plt.hist(livneh['{}_{}'.format(old_stns[i], names[thing])], zorder=3, color=clrs[thing],
+    #              bins=np.arange(lims[thing][0], lims[thing][1] + 2*steps[thing], steps[thing]) - steps[thing]/2)
+    #
+    #     plt.grid(zorder=1)
+    #     # plt.legend()
+    #     plt.ylim(0, bar_lims[thing])
+    #     # plt.ylim(lims[thing][0], lims[thing][1])
+    #     # plt.plot(lims[thing], lims[thing], 'k', zorder=4)
+    #
+    #     # if i % 6 == 0:
+    #     #     plt.ylabel('livneh {} [{}]'.format(names[thing], units[thing]))
+    #     if i//6 == 3:
+    #         plt.xlabel('Livneh {} [{}]'.format(names[thing], units[thing]))
+
+    # # Histograms of livneh temp data
+    # plt.figure()
+    # for i in range(24):
+    #     plt.subplot(4, 6, i + 1)
+    #     plt.title(old_stns[i])
+    #     plt.hist([livneh['{}_Tmin'.format(old_stns[i])], livneh['{}_Tmax'.format(old_stns[i])]],
+    #              color=['tab:blue', 'tab:red'], label=['Tmin', 'Tmax'], zorder=3, histtype='stepfilled', alpha=0.3,
+    #              bins=np.arange(lims[thing][0], lims[thing][1] + 2 * steps[thing], steps[thing]) - steps[
+    #                  thing] / 2, density=True)
+    #     plt.hist([livneh['{}_Tmin'.format(old_stns[i])], livneh['{}_Tmax'.format(old_stns[i])]],
+    #              color=['tab:blue', 'tab:red'], label=['Tmin', 'Tmax'], zorder=4, histtype='step',
+    #              bins=np.arange(lims[thing][0], lims[thing][1] + 2 * steps[thing], steps[thing]) - steps[
+    #                  thing] / 2, density=True)
+    #     plt.grid(zorder=1)
+    #     plt.legend(loc='upper left')
+    #     # plt.ylim(0, 6500)
+    #     plt.ylim(0, 0.055)
+    #
+    #     if i % 6 == 0:
+    #         plt.ylabel('Days')
+    #     if i // 6 == 3:
+    #         plt.xlabel('Livneh Temp [C]')
+
+    # # Histograms of livneh temp data
+    # plt.figure()
+    # for i in range(24):
+    #     plt.subplot(4, 6, i + 1)
+    #     plt.title("{} ({})".format(am_metadata[old_stns[i]]['properties']['title'], old_stns[i].upper()),
+    #               color=mpl.colormaps['viridis'](old_stns_d[old_stns[i]]/24))
+    #     plt.hist([livneh['{}_Tmin'.format(old_stns[i])], livneh['{}_Tmax'.format(old_stns[i])]],
+    #              color=['tab:blue', 'tab:red'], zorder=3, histtype='stepfilled', alpha=0.3,
+    #              bins=np.arange(lims[thing][0], lims[thing][1] + 2 * steps[thing], steps[thing]) - steps[
+    #                  thing] / 2, density=True)
+    #     plt.hist([livneh['{}_Tmin'.format(old_stns[i])], livneh['{}_Tmax'.format(old_stns[i])]],
+    #              color=['tab:blue', 'tab:red'], zorder=4, histtype='step',
+    #              bins=np.arange(lims[thing][0], lims[thing][1] + 2 * steps[thing], steps[thing]) - steps[
+    #                  thing] / 2, density=True)
+    #     plt.grid(zorder=1)
+    #     # plt.legend(loc='upper left')
+    #     # plt.ylim(0, 6500)
+    #     plt.ylim(0, 0.055)
+    #
+    #     if i == 5:
+    #         from matplotlib.patches import Patch
+    #         from matplotlib.colors import to_rgba
+    #         legend_elements = [Patch(facecolor=to_rgba('tab:blue', 0.3), edgecolor='tab:blue', label='Tmin'),
+    #                            Patch(facecolor=to_rgba('tab:red', 0.3), edgecolor='tab:red', label='Tmax')]
+    #         plt.legend(handles=legend_elements, loc='upper left')
+    #
+    #     if i % 6 == 0:
+    #         plt.ylabel('Frequency')
+    #     if i // 6 == 3:
+    #         plt.xlabel('Livneh Temp [C]')
+
+    # Histograms of livneh temp data
+    plt.figure()
+    plt.suptitle("Climate Distributions, 1950-2013")
+    for i in range(24):
+        plt.subplot(4, 6, i + 1)
+        stn = inv_stns_d[i]
+        bins = np.arange(-40, 40 + 2 * 5, 5) - 5/5
+        # plt.title("{} ({})".format(am_metadata[stn]['properties']['title'], stn.upper()),
+        #           color=mpl.colormaps['viridis'](old_stns_d[old_stns[i]] / 24))
+        plt.title("{} ({})".format(am_metadata[stn]['properties']['title'], stn.upper()))
+        plt.hist([livneh['{}_Tmin'.format(stn)], livneh['{}_Tmax'.format(stn)]],
+                 color=['tab:blue', 'tab:red'], zorder=3, histtype='stepfilled', alpha=0.3,
+                 bins=bins, density=True)
+        plt.hist([livneh['{}_Tmin'.format(stn)], livneh['{}_Tmax'.format(stn)]],
+                 color=['tab:blue', 'tab:red'], zorder=4, histtype='step',
+                 bins=bins, density=True)
+        # plt.hist([livneh['{}_Tmin'.format(stn)], livneh['{}_Tmax'.format(stn)]],
+        #          color=['tab:blue', 'tab:red'], zorder=3, histtype='stepfilled', alpha=0.3,
+        #          bins=np.arange(lims[thing][0], lims[thing][1] + 2 * steps[thing], steps[thing]) - steps[
+        #              thing] / 2, density=True)
+        # plt.hist([livneh['{}_Tmin'.format(stn)], livneh['{}_Tmax'.format(stn)]],
+        #          color=['tab:blue', 'tab:red'], zorder=4, histtype='step',
+        #          bins=np.arange(lims[thing][0], lims[thing][1] + 2 * steps[thing], steps[thing]) - steps[
+        #              thing] / 2, density=True)
+        plt.grid(zorder=1)
+        plt.ylim(0, 0.055)
+        if i == 5:
+            from matplotlib.patches import Patch
+            from matplotlib.colors import to_rgba
+            legend_elements = [Patch(facecolor=to_rgba('tab:blue', 0.3), edgecolor='tab:blue', label='Daily Minimum'),
+                               Patch(facecolor=to_rgba('tab:red', 0.3), edgecolor='tab:red', label='Daily Maximum')]
+            plt.legend(handles=legend_elements, loc='upper left')
+        if i % 6 == 0:
+            plt.ylabel('Frequency')
+        if i // 6 == 3:
+            plt.xlabel('Livneh Temperature [C]')
+
+    # # Density plots
+    # # plt.figure()
+    # fig, axs = plt.subplots(4, 6)
+    # print(np.shape(axs))
+    # for i in range(24):
+    #     # plt.subplot(4, 6, i + 1)
+    #     x, y = i // 6, i % 6
+    #     axs[x, y].set_title(old_stns[i])
+    #     density_scatter(livneh1['{}_{}_gm'.format(old_stns[i], names[thing])],
+    #                     livneh1['{}_{}'.format(old_stns[i], names[thing])], ax=axs[x, y],
+    #                     zorder=3, s=2)
+    #
+    #     # # Linear regression for slope and r^2
+    #     # res1 = linregress(livneh1['{}_{}_gm'.format(old_stns[i], names[thing])],
+    #     #                   livneh1['{}_{}'.format(old_stns[i], names[thing])])
+    #     # plt.plot(lims[thing], res1.intercept + res1.slope * np.asarray(lims[thing]),
+    #     #          label='m:{:.2f} r^2:{:.2f}'.format(res1.slope, res1.rvalue ** 2), color='tab:gray', zorder=5)
+    #
+    #     axs[x, y].grid(zorder=1)
+    #     # axs[x, y].legend()
+    #     axs[x, y].set_xlim(lims[thing][0], lims[thing][1])
+    #     axs[x, y].set_ylim(lims[thing][0], lims[thing][1])
+    #     axs[x, y].plot(lims[thing], lims[thing], 'k', zorder=4)
+    #
+    #     if i % 6 == 0:
+    #         axs[x, y].set_ylabel('livneh {} [{}]'.format(names[thing], units[thing]))
+    #     if i // 6 == 3:
+    #         axs[x, y].set_xlabel('gridmet {} [{}]'.format(names[thing], units[thing]))
+
+    # # I'm not sure what this is telling me.
+    # plt.figure(figsize=(10, 2))
+    # plt.plot(livneh1['{}_{}'.format(stns[0], names[thing])], label='Livneh')
+    # plt.plot(livneh1['{}_{}_gm'.format(stns[0], names[thing])], label='GridMET')
+    # plt.grid()
+    # plt.legend()
+
+    # plt.figure()
+    # for i in range(6):
+    #     stn = stns[i + 0]  # Add a 0, 6, 12, or 18 to plot other sets of 6 stations
+    #     plt.subplot(6, 1, i+1)
+    #     plt.title(stn)
+    #     plt.plot(livneh1['{}_{}'.format(stn, names[thing])], label='Livneh')
+    #     plt.plot(livneh1['{}_{}_gm'.format(stn, names[thing])], label='GridMET')
+    #     plt.grid()
+    #     if i == 6:
+    #         plt.legend()
+
+    # # Looking at extreme temps
+    # for i in old_stns:
+    #     print("{} gm: max {:.2f} min {:.2f} dif {:.2f}"
+    #           .format(i, livneh['{}_Tmax_gm'.format(i)].max(), livneh['{}_Tmin_gm'.format(i)].min(),
+    #                   livneh['{}_Tmax_gm'.format(i)].max() - livneh['{}_Tmin_gm'.format(i)].min()))
+    #     print("{} ln: max {:.2f} min {:.2f} dif {:.2f}"
+    #           .format(i, livneh['{}_Tmax'.format(i)].max(), livneh['{}_Tmin'.format(i)].min(),
+    #                   livneh['{}_Tmax'.format(i)].max() - livneh['{}_Tmin'.format(i)].min()))
+
+    # if os.path.exists('F:/FileShare'):
+    #     main_dir = 'F:/FileShare/openet_pilot'
+    # else:
+    #     main_dir = 'F:/openet_pilot'
+    # conec = sqlite3.connect(os.path.join(main_dir, "opnt_analysis_03042024_Copy.db"))  # full project
+    # gm_d = os.path.join(main_dir, 'gridmet')  # location of general gridmet files
+    # gridmet_cent = os.path.join(gm_d, 'gridmet_centroids_MT.shp')
+    # fields_db = 'field_data'
+    #
+    # twentyfive = pd.DataFrame()
+    # twentyfive['id'] = old_stns
+    # twentyfive['lat'] = [am_md[x]['geometry']['coordinates'][1] for x in old_stns]
+    # twentyfive['lon'] = [am_md[x]['geometry']['coordinates'][0] for x in old_stns]
+    #
+    # twentyfive = gridmet_match(conec, twentyfive, gridmet_cent, fields_db)
+
+    # print(twentyfive)
+    # print()
+    # print(livneh)
+
+    # # Adding GridMET information to Livneh data
+    # for i in tqdm(old_stns, total=len(old_stns)):
+    #     gfid = twentyfive[twentyfive['id'] == i]['gfid'].values[0]
+    #     grd = pd.read_sql("SELECT date, eto_mm, tmax_c, tmin_c FROM gridmet_ts WHERE gfid={}".format(gfid), conec)
+    #     grd.index = grd['date']
+    #     grd = grd[grd.index < '2014-01-01']
+    #     livneh['{}_Tmax_gm'.format(i)] = grd['tmax_c']
+    #     livneh['{}_Tmin_gm'.format(i)] = grd['tmin_c']
+    #     livneh['{}_eto_gm'.format(i)] = grd['eto_mm']
+    # livneh = livneh.reindex(sorted(livneh.columns), axis=1)
+    # livneh.to_csv('C:/Users/CND571/Documents/Data/livneh_25_agrimet_allyears_20241122.csv')
+
+    # # Adding ETo information for Livneh data
+    # for i in tqdm(old_stns, total=len(old_stns)):
+    #     # tmean = (livneh['{}_Tmax'.format(i)] + livneh['{}_Tmin'.format(i)]) / 2
+    #     # vpd = calculate_vpd_temponly()
+    #     lat = am_md[i]['geometry']['coordinates'][1]
+    #     lon = am_md[i]['geometry']['coordinates'][0]
+    #     elev = elevation_from_coordinate(lat, lon)
+    #     # print('elev', elev)
+    #     # print('lat', lat)
+    #     livneh['{}_eto'.format(i)] = pm_fao56_ref(tmean=None, wind=livneh['{}_wind'.format(i)],
+    #                                               tmax=livneh['{}_Tmax'.format(i)], tmin=livneh['{}_Tmin'.format(i)],
+    #                                               elevation=elev, lat=(lat * np.pi/180))
+    # print()
+    # print(livneh)
+    # livneh.to_csv('C:/Users/CND571/Documents/Data/livneh_25_agrimet_allyears_20241122.csv')
+
+
 if __name__ == '__main__':
     """ Focus on 3 "collocated" Agrimet/Gridmet stations. """
     # am_stns = ['COVM', 'CRSM', 'MWSM']
     # mn_stns = ['corvalli', 'kalispel', 'moccasin']
 
-    am_md = load_stations()
-    mn_md = stns_metadata()
+    # old_stns = ['bfam', 'bftm', 'bozm', 'brgm', 'brtm', 'covm', 'crsm', 'dlnm', 'drlm', 'gfmt', 'glgm', 'hrlm',
+    #             'hvmt', 'jvwm', 'lmmm', 'matm', 'mwsm', 'rbym', 'rdbm', 'sigm', 'svwm', 'tosm', 'trfm', 'umhm',
+    #             'wssm']  # am
+    # mwsm dropped because it does not have gridmet point in SID.
+    old_stns = ['bfam', 'bftm', 'bozm', 'brgm', 'brtm', 'covm', 'crsm', 'dlnm', 'drlm', 'gfmt', 'glgm', 'hrlm', 'hvmt',
+                'jvwm', 'lmmm', 'matm', 'rbym', 'rdbm', 'sigm', 'svwm', 'tosm', 'trfm', 'umhm', 'wssm']  # am
+    old_stns_d = {'bfam': 1, 'bftm': 3, 'bozm': 22, 'brgm': 11, 'brtm': 10, 'covm': 12,
+                  'crsm': 0, 'dlnm': 18, 'drlm': 13, 'gfmt': 9, 'glgm': 5, 'hrlm': 2,
+                  'hvmt': 14, 'jvwm': 19, 'lmmm': 17, 'matm': 4, 'rbym': 20, 'rdbm': 6,
+                  'sigm': 7, 'svwm': 23, 'tosm': 21, 'trfm': 8, 'umhm': 16, 'wssm': 15}  # am
+    inv_stns_d = {v: k for k, v in old_stns_d.items()}
 
-    print(len(am_md))
+    old_stns_d1 = {'bfam': 1, 'bftm': 4, 'bozm': 21, 'brgm': 17, 'brtm': 23, 'covm': 18,
+                   'crsm': 0, 'dlnm': 20, 'drlm': 19, 'gfmt': 13, 'glgm': 11, 'hrlm': 10,
+                   'hvmt': 2, 'jvwm': 8, 'lmmm': 22, 'matm': 5, 'rbym': 14, 'rdbm': 6,
+                   'sigm': 12, 'svwm': 15, 'tosm': 9, 'trfm': 7, 'umhm': 16, 'wssm': 3}  # am
+    inv_stns_d1 = {v: k for k, v in old_stns_d1.items()}
+
+    am_md = load_stations()
+    # mn_md = stns_metadata()
+
+    print(am_md[old_stns[0]])
     # print(am_md['abei'])
     # print(mn_md['aceabsar'])
+
+    # plt.figure()
+    # for i in old_stns:
+    #     print(am_md[i]['properties']['title'])
+    #     plt.text(am_md[i]['geometry']['coordinates'][0], am_md[i]['geometry']['coordinates'][1],
+    #              am_md[i]['properties']['siteid'].upper())
+    # plt.xlim(-116, -104)
+    # plt.ylim(44, 49)
+    #
+    # # Testing station organization
+    # plt.figure(figsize=(10, 4))
+    # plt.subplot(121)
+    # for i in old_stns:
+    #     # print(am_md[i]['geometry']['coordinates'][0], am_md[i]['geometry']['coordinates'][1],
+    #     #       am_md[i]['properties']['siteid'].upper())
+    #     plt.text(am_md[i]['geometry']['coordinates'][0], am_md[i]['geometry']['coordinates'][1],
+    #              am_md[i]['properties']['siteid'].upper(), color=mpl.colormaps['viridis'](old_stns_d[i]/24))
+    # plt.xlim(-116, -104)
+    # plt.ylim(44, 49)
+    # plt.subplot(122)
+    # for i in range(24):
+    #     # print(i % 6, i // 6, inv_stns_d[i])
+    #     plt.text(i % 6, i // 6, "{} {}".format(i, inv_stns_d[i].upper()), color=mpl.colormaps['viridis'](i/24))
+    # plt.xlim(0, 5)
+    # plt.ylim(3, 0)
+    #
+    # plt.figure(figsize=(10, 4))
+    # plt.subplot(121)
+    # for i in old_stns:
+    #     # print(am_md[i]['geometry']['coordinates'][0], am_md[i]['geometry']['coordinates'][1],
+    #     #       am_md[i]['properties']['siteid'].upper())
+    #     plt.text(am_md[i]['geometry']['coordinates'][0], am_md[i]['geometry']['coordinates'][1],
+    #              am_md[i]['properties']['siteid'].upper(), color=mpl.colormaps['viridis'](old_stns_d1[i] / 24))
+    # plt.xlim(-116, -104)
+    # plt.ylim(44, 49)
+    # plt.subplot(122)
+    # for i in range(24):
+    #     # print(i % 6, i // 6, inv_stns_d1[i])
+    #     plt.text(i % 6, i // 6, "{} {}".format(i, inv_stns_d1[i].upper()), color=mpl.colormaps['viridis'](i / 24))
+    # plt.xlim(0, 5)
+    # plt.ylim(3, 0)
+
+    livneh_stuff(old_stns, am_md)
 
     # # This still seems like a good set to use for initial livneh comparisons...
     # print(am_md['covm'])  # 1984
@@ -1170,7 +1638,7 @@ if __name__ == '__main__':
 
     # all_data.to_csv('C:/Users/CND571/Documents/Data/ETcompdata_20240820.csv')
 
-    all_data = pd.read_csv('C:/Users/CND571/Documents/Data/ETcompdata_20240822.csv', index_col='Unnamed: 0')
+    # all_data = pd.read_csv('C:/Users/CND571/Documents/Data/ETcompdata_20240822.csv', index_col='Unnamed: 0')
     #
     # which = []
     # for i in all_data.index:

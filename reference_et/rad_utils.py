@@ -2,7 +2,7 @@
 """The rad_utils module contains utility functions for radiation data
 
 """
-
+import numpy as np
 from numpy import sqrt, clip
 
 from .meteo_utils import calc_ea, extraterrestrial_r, daylight_hours
@@ -74,6 +74,15 @@ def calc_rad_long(rs, tindex=None, shape=None, tmean=None, tmax=None,
     if rso is None:
         ra = extraterrestrial_r(tindex, lat, shape)
         rso = calc_rso(ra=ra, elevation=elevation, kab=kab)
+
+    # TODO: check that this is okay to sub in Hargreaves
+    if rs is None:
+        ra = extraterrestrial_r(tindex, lat, shape)
+        # Hargreaves' radiation formula from FAO56 pg 60
+        krs = 0.16  # Assuming 'interior' location, not strongly influenced by a large water body.
+        rs = krs * np.sqrt(tmax - tmin) * ra
+        rs = np.minimum(rs, rso)  # make sure rs <= rso
+
     solar_rat = clip(rs / rso, 0.3, 1)
     if tmax is not None:
         tmp1 = STEFAN_BOLTZMANN_DAY * ((tmax + 273.16) ** 4 +
@@ -88,7 +97,7 @@ def calc_rad_long(rs, tindex=None, shape=None, tmean=None, tmax=None,
 
 
 def calc_rad_short(rs=None, tindex=None, lat=None, shape=None, albedo=0.23,
-                   n=None, nn=None, as1=0.25, bs1=0.5):
+                   n=None, nn=None, as1=0.25, bs1=0.5, tmax=None, tmin=None):
     """Net shortwave radiation [MJ m-2 d-1].
 
     Parameters
@@ -124,10 +133,10 @@ def calc_rad_short(rs=None, tindex=None, lat=None, shape=None, albedo=0.23,
         return (1 - albedo) * rs
     else:
         return (1 - albedo) * calc_rad_sol_in(tindex, lat, shape, n, as1=as1,
-                                              bs1=bs1, nn=nn)
+                                              bs1=bs1, nn=nn, tmax=tmax, tmin=tmin)
 
 
-def calc_rad_sol_in(tindex, lat, shape, n, as1=0.25, bs1=0.5, nn=None):
+def calc_rad_sol_in(tindex, lat, shape, n, as1=0.25, bs1=0.5, nn=None, tmax=None, tmin=None):
     """Incoming solar radiation [MJ m-2 d-1].
 
     Parameters
@@ -158,7 +167,14 @@ def calc_rad_sol_in(tindex, lat, shape, n, as1=0.25, bs1=0.5, nn=None):
     ra = extraterrestrial_r(tindex, lat, shape)
     if nn is None:
         nn = daylight_hours(tindex, lat)
-    return (as1 + bs1 * n / nn) * ra
+    # TODO: check that it is okay to sub in Hargreaves
+    if n is None:
+        # Hargreaves' radiation formula from FAO56 pg 60
+        krs = 0.16  # Assuming 'interior' location, not strongly influenced by a large water body.
+        rs = krs * np.sqrt(tmax - tmin) * ra
+    else:
+        rs = (as1 + bs1 * n / nn) * ra
+    return rs
 
 
 def calc_rso(ra, elevation, kab=None):

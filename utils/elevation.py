@@ -19,13 +19,12 @@ url = r'https://epqs.nationalmap.gov/v1/json?'
 #     return elev
 
 
-def elevation_from_coordinate(lat, lon):
+def elevation_from_coordinate(lat, lon, project='ee-hehaugen'):
     """ Use Earth Engine API to get elevation data (in meters) from decimal degree coordinates.
     Dataset referenced is NASA SRTM Digital Elevation 30m. """
 
-    # should I initialize ee here, or somewhere else?
     ee.Authenticate()
-    ee.Initialize(project='ee-hehaugen')
+    ee.Initialize(project=project)
 
     img = ee.Image("USGS/SRTMGL1_003")
     point = ee.Geometry.Point(lon, lat)

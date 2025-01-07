@@ -747,7 +747,7 @@ def get_rn(tmean, rs=None, lat=None, n=None, nn=None, tmax=None, tmin=None,
     tindex, shape = get_index_shape(tmean)
     rns = calc_rad_short(rs=rs, tindex=tindex, lat=lat, n=n, nn=nn,
                          shape=shape, albedo=albedo, as1=as1,
-                         bs1=bs1)  # [MJ/m2/d]
+                         bs1=bs1, tmax=tmax, tmin=tmin)  # [MJ/m2/d]
     rnl = calc_rad_long(rs=rs, tmean=tmean, tmax=tmax, tmin=tmin, rhmax=rhmax,
                         rhmin=rhmin, rh=rh, elevation=elevation, lat=lat,
                         rso=rso, a=a, b=b, ea=ea, kab=kab, tindex=tindex,

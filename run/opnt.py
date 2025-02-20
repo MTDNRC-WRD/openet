@@ -7,12 +7,12 @@ import matplotlib.pyplot as plt
 from datetime import timedelta
 import datetime as dt
 
-from run_all import COUNTIES
+# from run_all import COUNTIES
 
 SPLIT = ['047', '111', '099', '081', '073', '105', '031', '049', '067', '097']
 
 
-def openet_get_fields_export(fields, start, end, et_too=False,
+def openet_get_fields_export(fields, start, end, et_too=False, show=False,
                              api_key='C:/Users/CND571/Documents/Haugen_Montana_API.txt'):
     """ Uses OpenET API multipolygon export endpoint to get etof data given a Google Earth Engine asset.
 
@@ -58,6 +58,9 @@ def openet_get_fields_export(fields, start, end, et_too=False,
         "reference_et": "gridMET",
         "units": "in"
     }
+
+    if show:
+        print(args)
 
     # query the api
     resp = requests.post(
@@ -134,40 +137,6 @@ def rename_etof_downloads(path):
             newname = 'ensemble_etof_{}_{}_{}.csv'.format(county, srt, end)
         newpath = os.path.join(path, newname)
         os.rename(oldpath, newpath)
-
-
-def concat_etof(path, goal_yr_start=1985, goal_yr_end=2023):
-    """ Combine all etof files for each county.
-
-    Best to use if already known that all necessary data is downloaded and stored in the same directory. This will
-    cause errors/confusion if split counties haven't had all field sets run and data downloaded in all relevant
-    time periods.
-
-    Parameters
-    ----------
-    path: str, local directory where etof files are stored.
-    goal_yr_start: int, optional, the desired start year for the total period of record.
-    goal_yr_end: int, optional, the desired end year for the total period of record.
-    """
-    counties = {name[-17:-14] for name in os.listdir(path)}
-    print(len(counties), counties)
-    for i in counties:
-        files = [name for name in os.listdir(path) if "_{}".format(i) in name]
-        print(len(files), i, files)
-        goal_file = "ensemble_etof_all_{}_{}_{}.csv".format(i, goal_yr_start, goal_yr_end)
-        if goal_file not in files:
-            dfs = [pd.read_csv(os.path.join(path, j)) for j in files]
-            goal_df = pd.concat(dfs)
-            goal_df.drop_duplicates(inplace=True)
-            goal_df['time'] = pd.to_datetime(goal_df['time'])
-            srt = goal_df['time'].min().year
-            end = goal_df['time'].max().year
-            real_file = "ensemble_etof_all_{}_{}_{}.csv".format(i, srt, end)
-            if real_file == goal_file:
-                # print("Saving combined file for {} County ({})".format(COUNTIES[i], i))
-                goal_df.to_csv(os.path.join(path, goal_file))
-            else:
-                print("Please finish downloading data for {} County ({})".format(COUNTIES[i], i))
 
 
 def check_etof_data(counties, etof_dir, plot=False):
@@ -301,6 +270,40 @@ def check_etof_data(counties, etof_dir, plot=False):
     print('{}/{} total counties with some weird data.'.format(bad_counties, len(counties)))
     if plot:
         plt.show()
+
+
+def concat_etof(path, goal_yr_start=1985, goal_yr_end=2023):
+    """ Combine all etof files for each county.
+
+    Best to use if already known that all necessary data is downloaded and stored in the same directory. This will
+    cause errors/confusion if split counties haven't had all field sets run and data downloaded in all relevant
+    time periods.
+
+    Parameters
+    ----------
+    path: str, local directory where etof files are stored.
+    goal_yr_start: int, optional, the desired start year for the total period of record.
+    goal_yr_end: int, optional, the desired end year for the total period of record.
+    """
+    counties = {name[-17:-14] for name in os.listdir(path)}
+    print(len(counties), counties)
+    for i in counties:
+        files = [name for name in os.listdir(path) if "_{}".format(i) in name]
+        print(len(files), i, files)
+        goal_file = "ensemble_etof_all_{}_{}_{}.csv".format(i, goal_yr_start, goal_yr_end)
+        if goal_file not in files:
+            dfs = [pd.read_csv(os.path.join(path, j)) for j in files]
+            goal_df = pd.concat(dfs)
+            goal_df.drop_duplicates(inplace=True)
+            goal_df['time'] = pd.to_datetime(goal_df['time'])
+            srt = goal_df['time'].min().year
+            end = goal_df['time'].max().year
+            real_file = "ensemble_etof_all_{}_{}_{}.csv".format(i, srt, end)
+            if real_file == goal_file:
+                # print("Saving combined file for {} County ({})".format(COUNTIES[i], i))
+                goal_df.to_csv(os.path.join(path, goal_file))
+            else:
+                print("Please finish downloading data for {} County ({})".format(COUNTIES[i], i))
 
 
 def check_etof_data_concat(counties, etof_dir, plot=False):

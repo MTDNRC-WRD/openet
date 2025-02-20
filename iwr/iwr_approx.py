@@ -373,14 +373,14 @@ def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', sea
     # NEH 2-233 "...mean temperature is assumed to occur on the 15th day of each month..."
     # however, this gives results that differ substantially from NRCS IWR database files
     mid_months = [d for d in df.index if d.day == 15]
-    t = df['MM'].loc[mid_months].resample('M').mean()
+    t = df['MM'].loc[mid_months].resample('ME').mean()
     t = t.groupby(t.index.month).mean() * 9 / 5 + 32
     # print(t)
 
     # precipitation data
-    p = df['PP'].resample('M').sum()
+    p = df['PP'].resample('ME').sum()
     p = p.groupby(p.index.month).mean() / 25.4  # mm to in
-    annual_p = df['PP'].resample('Y').sum() / 25.4
+    annual_p = df['PP'].resample('YE').sum() / 25.4
 
     dtmm = df['MM'].groupby([df.index.month, df.index.day]).mean() * 9 / 5 + 32
     if len(dtmm) > 365:
@@ -453,7 +453,8 @@ def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', sea
     df['f'] = df['t'] * df['p'] / 100.  # monthly consumptive use factor
 
     df['kt'] = df['t'] * 0.0173 - 0.314
-    df['kt'][df['t'] < 36.] = 0.3
+    # df['kt'][df['t'] < 36.] = 0.3
+    df.loc[df['t'] < 36., 'kt'] = 0.3
 
     elevation_corr = 1 + (0.1 * (elev / 1000.))  # from footnote 3 on IWR results page
 
@@ -525,28 +526,54 @@ def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', sea
     # Net irrigation requirements (almost "consumptive use", just needs management factor)
     df['cu'] = df['u'] - df['ep']
 
+    # # Accounting for start and end of season carryover
+    # # start of season carryover
+    # beg_co = carryover
+    # i = 0
+    # while beg_co != 0:
+    #     if df['cu'].iloc[i] > beg_co:
+    #         df['cu'].iloc[i] = df['cu'].iloc[i] - beg_co
+    #         beg_co = 0
+    #     else:
+    #         beg_co = beg_co - df['cu'].iloc[i]
+    #         df['cu'].iloc[i] = 0
+    #         i += 1
+    # # end of season carryover
+    # end_co = carryover
+    # i = 1
+    # while end_co != 0:
+    #     if df['cu'].iloc[-i] > end_co:
+    #         df['cu'].iloc[-i] = df['cu'].iloc[-i] - end_co
+    #         end_co = 0
+    #     else:
+    #         end_co = end_co - df['cu'].iloc[-i]
+    #         df['cu'].iloc[-i] = 0
+    #         i += 1
+
+    # # A different method to avoid future warnings?
     # Accounting for start and end of season carryover
     # start of season carryover
+    cu_i = df.columns.get_loc('cu')
     beg_co = carryover
     i = 0
     while beg_co != 0:
-        if df['cu'].iloc[i] > beg_co:
-            df['cu'].iloc[i] = df['cu'].iloc[i] - beg_co
+        if df.iloc[i, cu_i] > beg_co:
+            df.iloc[i, cu_i] = df.iloc[i, cu_i] - beg_co
             beg_co = 0
         else:
-            beg_co = beg_co - df['cu'].iloc[i]
-            df['cu'].iloc[i] = 0
+            beg_co = beg_co - df.iloc[i, cu_i]
+            df.iloc[i, cu_i] = 0
             i += 1
     # end of season carryover
     end_co = carryover
     i = 1
     while end_co != 0:
-        if df['cu'].iloc[-i] > end_co:
-            df['cu'].iloc[-i] = df['cu'].iloc[-i] - end_co
+        if df.iloc[-i, cu_i] > end_co:
+            df.iloc[-i, cu_i] = df.iloc[-i, cu_i] - end_co
             end_co = 0
         else:
-            end_co = end_co - df['cu'].iloc[-i]
-            df['cu'].iloc[-i] = 0
+            end_co = end_co - df.iloc[-i, cu_i]
+            df.iloc[-i, cu_i] = 0
             i += 1
 
     return df, season_start, season_end

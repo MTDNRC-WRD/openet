@@ -395,6 +395,25 @@ def clustered_field_etf_opnt(feature_coll, bucket=None, debug=False, mask_type='
     print(desc)
 
 
+def irrmapper_export(feature_coll, start_yr=1985, end_yr=2024, bucket='mt_cu_2024', filename='irrmapper_ref'):
+    feature_coll = ee.FeatureCollection(feature_coll)
+
+    # Don't actually need this stuff?
+    # irr_coll = ee.ImageCollection(IRR)
+    # [110.0, 0.0, 113.0, 0.0, 110.0, 3.0, ]
+    # bounds = ee.Geometry.Polygon([-117.0, 44.0, -117.0, 50.0, -104.0, 50.0, -104.0, 44.0])  # rough bounds of MT
+    # coll = (irr_coll.filterDate('{}-01-01'.format(start_yr), '{}-12-31'.format(end_yr))
+    #         .filterBounds(bounds).select('classification'))
+    # remap = coll.map(lambda img: img.lt(1))
+
+    first_year_img = ee.Image(IRR + '/MT_'.format(start_yr)).lt(1).rename(start_yr)
+    for yr in range(start_yr, end_yr+1):
+        year_img = ee.Image(IRR + '/MT_'.format(yr)).lt(1).rename(yr)
+        first_year_img.addBands(year_img)
+    result = first_year_img.reduceRegions(feature_coll, ee.Reducer.mean())
+    ee.batch.Export.table.toCloudStorage(result, filename, bucket, filename, 'CSV')
+
+
 if __name__ == '__main__':
 
     d = '/media/research/IrrigationGIS/swim'

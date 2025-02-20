@@ -218,7 +218,8 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
     df['f'] = df['t'] * df['p'] / 100.  # monthly consumptive use factor
 
     df['kt'] = df['t'] * 0.0173 - 0.314
-    df['kt'][df['t'] < 36.] = 0.3
+    # df['kt'][df['t'] < 36.] = 0.3
+    df.loc[df['t'] < 36., 'kt'] = 0.3
 
     elev = row['Elevation'] / 3.281  # feet to meters
     elevation_corr = 1 + (0.1 * (elev / 1000.))  # from footnote 3 on IWR results page
@@ -312,30 +313,55 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
     # Net irrigation requirements ("consumptive use")
     df['cu'] = df['u'] - df['ep']
 
-    # Accounting for start and end of season carryover
+    # # Accounting for start and end of season carryover
+    # # start of season carryover
+    # beg_co = carryover
+    # i = 0
+    # while beg_co != 0:
+    #     if df['cu'].iloc[i] > beg_co:
+    #         df['cu'].iloc[i] = df['cu'].iloc[i] - beg_co
+    #         beg_co = 0
+    #     else:
+    #         beg_co = beg_co - df['cu'].iloc[i]
+    #         df['cu'].iloc[i] = 0
+    #         i += 1
+    #
+    # # end of season carryover
+    # end_co = carryover
+    # i = 1
+    # while end_co != 0:
+    #     if df['cu'].iloc[-i] > end_co:
+    #         df['cu'].iloc[-i] = df['cu'].iloc[-i] - end_co
+    #         end_co = 0
+    #     else:
+    #         end_co = end_co - df['cu'].iloc[-i]
+    #         df['cu'].iloc[-i] = 0
+    #         i += 1
 
+    # # A different method to avoid future warnings?
+    # Accounting for start and end of season carryover
     # start of season carryover
+    cu_i = df.columns.get_loc('cu')
     beg_co = carryover
     i = 0
     while beg_co != 0:
-        if df['cu'].iloc[i] > beg_co:
-            df['cu'].iloc[i] = df['cu'].iloc[i] - beg_co
+        if df.iloc[i, cu_i] > beg_co:
+            df.iloc[i, cu_i] = df.iloc[i, cu_i] - beg_co
             beg_co = 0
         else:
-            beg_co = beg_co - df['cu'].iloc[i]
-            df['cu'].iloc[i] = 0
+            beg_co = beg_co - df.iloc[i, cu_i]
+            df.iloc[i, cu_i] = 0
             i += 1
-
     # end of season carryover
     end_co = carryover
     i = 1
     while end_co != 0:
-        if df['cu'].iloc[-i] > end_co:
-            df['cu'].iloc[-i] = df['cu'].iloc[-i] - end_co
+        if df.iloc[-i, cu_i] > end_co:
+            df.iloc[-i, cu_i] = df.iloc[-i, cu_i] - end_co
             end_co = 0
         else:
-            end_co = end_co - df['cu'].iloc[-i]
-            df['cu'].iloc[-i] = 0
+            end_co = end_co - df.iloc[-i, cu_i]
+            df.iloc[-i, cu_i] = 0
             i += 1
 
     table.close()
@@ -755,7 +781,8 @@ def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=Non
     df['f'] = df['t'] * df['p'] / 100.  # monthly consumptive use factor
 
     df['kt'] = df['t'] * 0.0173 - 0.314
-    df['kt'][df['t'] < 36.] = 0.3
+    # df['kt'][df['t'] < 36.] = 0.3
+    df.loc[df['t'] < 36., 'kt'] = 0.3
 
     elevation_corr = 1 + (0.1 * (elev / 1000.))  # from footnote 3 on IWR results page
 
@@ -848,30 +875,55 @@ def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=Non
     # Net irrigation requirements ("consumptive use")
     df['cu'] = df['u'] - df['ep']
 
-    # Accounting for start and end of season carryover
+    # # Accounting for start and end of season carryover
+    # # start of season carryover
+    # beg_co = carryover
+    # i = 0
+    # while beg_co != 0:
+    #     if df['cu'].iloc[i] > beg_co:
+    #         df['cu'].iloc[i] = df['cu'].iloc[i] - beg_co
+    #         beg_co = 0
+    #     else:
+    #         beg_co = beg_co - df['cu'].iloc[i]
+    #         df['cu'].iloc[i] = 0
+    #         i += 1
+    #
+    # # end of season carryover
+    # end_co = carryover
+    # i = 1
+    # while end_co != 0:
+    #     if df['cu'].iloc[-i] > end_co:
+    #         df['cu'].iloc[-i] = df['cu'].iloc[-i] - end_co
+    #         end_co = 0
+    #     else:
+    #         end_co = end_co - df['cu'].iloc[-i]
+    #         df['cu'].iloc[-i] = 0
+    #         i += 1
 
+    # # A different method to avoid future warnings?
+    # Accounting for start and end of season carryover
     # start of season carryover
+    cu_i = df.columns.get_loc('cu')
     beg_co = carryover
     i = 0
     while beg_co != 0:
-        if df['cu'].iloc[i] > beg_co:
-            df['cu'].iloc[i] = df['cu'].iloc[i] - beg_co
+        if df.iloc[i, cu_i] > beg_co:
+            df.iloc[i, cu_i] = df.iloc[i, cu_i] - beg_co
             beg_co = 0
         else:
-            beg_co = beg_co - df['cu'].iloc[i]
-            df['cu'].iloc[i] = 0
+            beg_co = beg_co - df.iloc[i, cu_i]
+            df.iloc[i, cu_i] = 0
             i += 1
-
     # end of season carryover
     end_co = carryover
     i = 1
     while end_co != 0:
-        if df['cu'].iloc[-i] > end_co:
-            df['cu'].iloc[-i] = df['cu'].iloc[-i] - end_co
+        if df.iloc[-i, cu_i] > end_co:
+            df.iloc[-i, cu_i] = df.iloc[-i, cu_i] - end_co
             end_co = 0
         else:
-            end_co = end_co - df['cu'].iloc[-i]
-            df['cu'].iloc[-i] = 0
+            end_co = end_co - df.iloc[-i, cu_i]
+            df.iloc[-i, cu_i] = 0
             i += 1
 
     return df, season_start, season_end

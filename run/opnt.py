@@ -12,7 +12,7 @@ from run_all import COUNTIES
 SPLIT = ['047', '111', '099', '081', '073', '105', '031', '049', '067', '097']
 
 
-def openet_get_fields_export(fields, start, end, et_too=False, show=False, interval='daily',
+def openet_get_fields_export(fields, start, end, et_too=False, show=False, interval='daily', version=2.1,
                              api_key='C:/Users/CND571/Documents/Haugen_Montana_API.txt'):
     """ Uses OpenET API multipolygon export endpoint to get etof data given a Google Earth Engine asset.
 
@@ -27,6 +27,7 @@ def openet_get_fields_export(fields, start, end, et_too=False, show=False, inter
     et_too: bool, optional; if True, also download OpenET ensemble ET over same time period and set of fields
     show: bool, optional; prints the arguments used in the api call
     interval: str, optional;
+    version: which collection of data to use, either 2.0 or 2.1. Historic (pre-2000) data for MT is only in 2.0.
     api_key: str, optional; path to local .txt file where API key from user's OpenET account is stored.
     Key is first line in file.
     """
@@ -77,7 +78,8 @@ def openet_get_fields_export(fields, start, end, et_too=False, show=False, inter
         "model": "Ensemble",
         "variable": "ETof",  # "ETof" or "ET"
         "reference_et": "gridMET",
-        "units": "mm"
+        "units": "mm",
+        "version": version
     }
 
     if show:
@@ -162,12 +164,12 @@ def get_all_openet_etof_data():
     # Period of record for OpenET final data: 2016, provisional back to 1985.
     # start_por, end_por = "1985-01-01", "2023-12-31"
     # Fetching old and new data separately to prevent timeouts.
-    old_start, old_end = "1991-01-01", "2015-12-31"
-    new_start, new_end = "2016-01-01", "2023-12-31"
+    old_start, old_end = "1991-01-01", "1999-12-31"
+    new_start, new_end = "2000-01-01", "2023-12-31"
     for i in tqdm(gee_county_files, total=len(gee_county_files)):
         gee_asset = 'projects/ee-hehaugen/assets/SID_15FEB2024/{}'.format(i)
-        openet_get_fields_export(gee_asset, old_start, old_end, interval='monthly')
-        openet_get_fields_export(gee_asset, new_start, new_end, interval='monthly')
+        openet_get_fields_export(gee_asset, old_start, old_end, interval='monthly', version=2.0)
+        openet_get_fields_export(gee_asset, new_start, new_end, interval='monthly', version=2.1)
 
 
 def rename_etof_downloads(path):

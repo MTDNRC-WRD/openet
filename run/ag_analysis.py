@@ -608,6 +608,7 @@ def all_counties_years_crops_both(scatter=False):
         plt.figure()
         # plt.scatter(res_drop, dif, zorder=2)
         for i in range(len(dif)):
+            # Is this error correct? Is it stuff that has no data, or is it just the result of other crops?
             plt.errorbar(res_drop[i], dif[i], xerr=err_drop[i], zorder=2, fmt='o', alpha=(1-err_drop[i])**2,
                          color='tab:green', mec='none')
         # plt.errorbar(res_drop, dif, xerr=err_drop, zorder=2, fmt='o')
@@ -702,7 +703,7 @@ if __name__ == '__main__':
 
     # all_counties_years_crops_acre()
     # all_counties_years_crops_frac()
-    # all_counties_years_crops_both(scatter=True)
+    all_counties_years_crops_both(scatter=True)
 
     plt.show()
 

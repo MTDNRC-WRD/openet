@@ -1,8 +1,9 @@
 
 import os
+import sqlite3
 
 import pandas as pd
-import sqlite3
+import matplotlib
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import numpy as np
@@ -17,11 +18,33 @@ from itertools import islice
 from matplotlib.colors import Normalize
 from scipy.interpolate import interpn
 
-from run_all import COUNTIES
+# from run_all import COUNTIES
+
+# changing default font families
+# matplotlib.rcParams['font.family'] = ['sans-serif']  # default
+matplotlib.rcParams['font.family'] = ['Calibri']
+# changing default color cycle
+dnrc_colors = ['#010068', '#F6a705', '#653c10', '#264935', '#a3c4ef', '#468a2b', '#a95e3c', '#808080', '#F5F5F5']
+# ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']  # tab
+matplotlib.rcParams['axes.prop_cycle'] = matplotlib.cycler(color=dnrc_colors)
+
+COUNTIES = {'001': 'Beaverhead', '003': 'Big Horn', '005': 'Blaine', '007': 'Broadwater', '009': 'Carbon',
+            '011': 'Carter', '013': 'Cascade', '015': 'Chouteau', '017': 'Custer', '019': 'Daniels',
+            '021': 'Dawson', '023': 'Deer Lodge', '025': 'Fallon', '027': 'Fergus', '029': 'Flathead',
+            '031': 'Gallatin', '033': 'Garfield', '035': 'Glacier', '037': 'Golden Valley', '039': 'Granite',
+            '041': 'Hill', '043': 'Jefferson', '045': 'Judith Basin', '047': 'Lake', '049': 'Lewis and Clark',
+            '051': 'Liberty', '053': 'Lincoln', '055': 'McCone', '057': 'Madison', '059': 'Meagher',
+            '061': 'Mineral', '063': 'Missoula', '065': 'Musselshell', '067': 'Park', '069': 'Petroleum',
+            '071': 'Phillips', '073': 'Pondera', '075': 'Powder River', '077': 'Powell', '079': 'Prairie',
+            '081': 'Ravalli', '083': 'Richland', '085': 'Roosevelt', '087': 'Rosebud', '089': 'Sanders',
+            '091': 'Sheridan', '093': 'Silver Bow', '095': 'Stillwater', '097': 'Sweet Grass', '099': 'Teton',
+            '101': 'Toole', '103': 'Treasure', '105': 'Valley', '107': 'Wheatland', '109': 'Wibaux',
+            '111': 'Yellowstone'}
 
 
 def sum_data(con, start=1987, end=2023, irrmapper=0, mf_periods='1997-2006', static_too=False, save=""):
     """ Creates a dataframe summarizing results over a given time period by querying database.
+
     con: sqplite connection
     start: int, optional; first year in period of interest.
     end: int, optional; last year in period of interest (inclusive).
@@ -29,6 +52,7 @@ def sum_data(con, start=1987, end=2023, irrmapper=0, mf_periods='1997-2006', sta
     mf_periods: str, optional; which management factor to apply to results.
     Options: '1997-2006', '1973-2006', or '1964-1973'
     static_too: bool, optional; False to do nothing, True to query the static IWR result table for the same mf period.
+    save:
     """
     data = pd.read_sql("SELECT * FROM field_cu_results WHERE irrmapper={} AND mf_periods='{}' "
                        "AND year BETWEEN {} AND {}"
@@ -481,18 +505,20 @@ def dif_hist(data):
 
 
 def dif_hist_1(data, iwr):
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(10, 5), dpi=200)
     plt.title("Difference in Consumptive Use Estimate (inches, DNRC (climate) minus OpenET)")
     bins = np.arange(-10, 25)+0.5
     plt.hist(iwr[iwr['county'] != '101']['dnrc_cu'] - data['opnt_cu'], bins=bins, zorder=5)
     # Extra stuff
     mean = (iwr[iwr['county'] != '101']['dnrc_cu'] - data['opnt_cu']).mean()
     std = (iwr[iwr['county'] != '101']['dnrc_cu'] - data['opnt_cu']).std()
-    plt.vlines(mean, 0, 5000, color='tab:pink', zorder=7,
+    # accent_clr = 'tab:pink'
+    accent_clr = dnrc_colors[1]
+    plt.vlines(mean, 0, 5000, color=accent_clr, zorder=7,
                label="mean: {:.2f}".format(mean))
-    plt.vlines([mean - std, mean + std], 0, 5000, color='tab:pink', zorder=7,
+    plt.vlines([mean - std, mean + std], 0, 5000, color=accent_clr, zorder=7,
                label="std:     {:.2f}".format(std), linestyle='dashed')
-    plt.axvspan(mean-std, mean+std, 0, 5000, color='tab:pink', alpha=0.5, zorder=3)
+    plt.axvspan(mean-std, mean+std, 0, 5000, color=accent_clr, alpha=0.5, zorder=3)
     # plt.vlines(0, 0, 5000, color='k', zorder=2)
     plt.grid(zorder=1)
     plt.legend()
@@ -763,123 +789,124 @@ def plot_results_2(data):
 
     plt.tight_layout()
 
-
-def plot_results_2_1(data, conv):
-    """Create figure comparing ET and consumptive use from two different methods."""
-
-    xs = []
-    ys = []
-    xs_et = []
-    ys_et = []
-    for i in data['county'].unique():
-        xs.append(data[data['county'] == i]['dnrc_cu'].mean())
-        ys.append(data[data['county'] == i]['opnt_cu'].mean())
-        xs_et.append(data[data['county'] == i]['etbc'].mean())
-        ys_et.append(data[data['county'] == i]['etos'].mean())
-
-    res1 = linregress(data['etbc'], data['etos'])
-    res1a = linregress(xs_et, ys_et)
-
-    # ET comparison
-    plt.figure(figsize=(15, 5), dpi=200)
-
-    plt.subplot(131)
-    plt.title("Average Seasonal ET (inches)")
-    plt.scatter(data['etbc'], data['etos'],
-                zorder=5, alpha=0.1, edgecolors='none', color='tab:blue', s=24)
-    # for i in data['county'].unique():
-    #     plt.scatter(data[data['county'] == i]['etbc'], data[data['county'] == i]['etos'],
-    #                 zorder=5, alpha=0.1, edgecolors='none', color='tab:blue', s=24)
-    # plt.plot(data['etbc'], data['etbc'], 'k', zorder=7)
-    plt.scatter(xs_et, ys_et, color='k', edgecolors='none', s=12, zorder=6, label='County mean values')
-    plt.grid(zorder=3)
-    plt.xlim(22, 38)
-    # plt.ylim(22, 38)
-    # plt.xlim(22, 51)
-    plt.ylim(22, 51)
-    plt.plot([0, 51], [0, 51], 'k', zorder=7, label='1:1')
-    plt.plot(np.sort(data['etbc']), res1.intercept + res1.slope * np.sort(data['etbc']),
-             zorder=9, color='tab:pink', ls='dashed',
-             label='y={:.2f}x+{:.1f} r^2: {:.2f}'.format(res1.slope, res1.intercept, res1.rvalue ** 2))
-    plt.plot(np.sort(data['etbc']), res1a.intercept + res1a.slope * np.sort(data['etbc']),
-             zorder=9, color='tab:purple', ls='dashed',
-             label='y={:.2f}x+{:.1f} r^2: {:.2f}'.format(res1a.slope, res1a.intercept, res1a.rvalue ** 2))
-    plt.xlabel('DNRC')
-    plt.ylabel('Gridmet ETo (grass reference)')
-    plt.legend()
-
-    def closest(sorted_dict, key):
-        """ Return closest key in `sorted_dict` to given `key`. """
-        assert len(sorted_dict) > 0
-        keys = list(islice(sorted_dict.irange(minimum=key), 1))
-        keys.extend(islice(sorted_dict.irange(maximum=key, reverse=True), 1))
-        return min(keys, key=lambda k: abs(key - k))
-
-    conv = SortedDict(conv)
-
-    # CU comparison
-    plt.subplot(132)
-    plt.title("Average Seasonal ET (inches)")
-    ys_etr_est = []
-    for i in data['county'].unique():
-        ys = 1.67 * data[data['county'] == i]['etos'] - 10.6
-        plt.scatter(data[data['county'] == i]['etbc'], ys,
-                    zorder=5, alpha=0.1, edgecolors='none', color='tab:blue', s=24)
-        plt.scatter(np.mean(data[data['county'] == i]['etbc']), np.mean(ys),
-                    color='k', edgecolors='none', s=12, zorder=6)
-        ys_etr_est.append(np.mean(ys))
-    # plt.plot(data['etbc'], data['etbc'], 'k', zorder=7)
-    # plt.scatter(0, 0, color='k', edgecolors='none', s=12, zorder=6, label='County mean values')
-    res2 = linregress(data['etbc'], 1.67 * data['etos'] - 10.6)
-    res2a = linregress(xs_et, ys_etr_est)
-    plt.plot(np.sort(data['etbc']), res2.intercept + res2.slope * np.sort(data['etbc']),
-             zorder=9, color='tab:pink', ls='dashed',
-             label='y={:.2f}x+{:.1f} r^2: {:.2f}'.format(res2.slope, res2.intercept, res2.rvalue ** 2))
-    plt.plot(np.sort(data['etbc']), res2a.intercept + res2a.slope * np.sort(data['etbc']),
-             zorder=9, color='tab:purple', ls='dashed',
-             label='y={:.2f}x+{:.1f} r^2: {:.2f}'.format(res2a.slope, res2a.intercept, res2a.rvalue ** 2))
-    plt.grid(zorder=3)
-    plt.xlim(22, 38)
-    # plt.ylim(22, 38)
-    # plt.xlim(22, 51)
-    plt.ylim(22, 51)
-    plt.plot([0, 51], [0, 51], 'k', zorder=7)
-    plt.xlabel('DNRC')
-    plt.ylabel('Estimated Gridmet ETr (alfalfa reference)')
-    plt.legend()
-
-    # CU comparison
-    plt.subplot(133)
-    plt.title("Average Seasonal ET (inches)")
-    ys_etr = []
-    for i in data['county'].unique():
-        ys = [conv[closest(conv, j)] for j in data[data['county'] == i]['etos']]
-        plt.scatter(data[data['county'] == i]['etbc'], ys,
-                    zorder=5, alpha=0.1, edgecolors='none', color='tab:blue', s=24)
-        plt.scatter(np.mean(data[data['county'] == i]['etbc']), np.mean(ys),
-                    color='k', edgecolors='none', s=12, zorder=6)
-        ys_etr.append(np.mean(ys))
-    # plt.plot(data['etbc'], data['etbc'], 'k', zorder=7)
-    # plt.scatter(0, 0, color='k', edgecolors='none', s=12, zorder=6, label='County mean values')
-    res3 = linregress(data['etbc'], [conv[closest(conv, j)] for j in data['etos']])
-    res3a = linregress(xs_et, ys_etr)
-    plt.plot(np.sort(data['etbc']), res3.intercept + res3.slope * np.sort(data['etbc']),
-             zorder=9, color='tab:pink', ls='dashed',
-             label='y={:.2f}x+{:.1f} r^2: {:.2f}'.format(res3.slope, res3.intercept, res3.rvalue ** 2))
-    plt.plot(np.sort(data['etbc']), res3a.intercept + res3a.slope * np.sort(data['etbc']),
-             zorder=9, color='tab:purple', ls='dashed',
-             label='y={:.2f}x+{:.1f} r^2: {:.2f}'.format(res3a.slope, res3a.intercept, res3a.rvalue ** 2))
-    plt.grid(zorder=3)
-    plt.xlim(22, 38)
-    # plt.ylim(22, 38)
-    # plt.xlim(22, 51)
-    plt.ylim(22, 51)
-    plt.plot([0, 51], [0, 51], 'k', zorder=7)
-    plt.xlabel('DNRC')
-    plt.ylabel('Gridmet ETr (alfalfa reference)')
-    plt.legend()
-
-    plt.tight_layout()
+#
+# def plot_results_2_1(data, conv):
+#     """Create figure comparing ET and consumptive use from two different methods."""
+#
+#     xs = []
+#     ys = []
+#     xs_et = []
+#     ys_et = []
+#     for i in data['county'].unique():
+#         xs.append(data[data['county'] == i]['dnrc_cu'].mean())
+#         ys.append(data[data['county'] == i]['opnt_cu'].mean())
+#         xs_et.append(data[data['county'] == i]['etbc'].mean())
+#         ys_et.append(data[data['county'] == i]['etos'].mean())
+#
+#     res1 = linregress(data['etbc'], data['etos'])
+#     res1a = linregress(xs_et, ys_et)
+#
+#     # ET comparison
+#     plt.figure(figsize=(15, 5), dpi=200)
+#
+#     plt.subplot(131)
+#     plt.title("Average Seasonal ET (inches)")
+#     plt.scatter(data['etbc'], data['etos'],
+#                 zorder=5, alpha=0.1, edgecolors='none', color='tab:blue', s=24)
+#     # for i in data['county'].unique():
+#     #     plt.scatter(data[data['county'] == i]['etbc'], data[data['county'] == i]['etos'],
+#     #                 zorder=5, alpha=0.1, edgecolors='none', color='tab:blue', s=24)
+#     # plt.plot(data['etbc'], data['etbc'], 'k', zorder=7)
+#     plt.scatter(xs_et, ys_et, color='k', edgecolors='none', s=12, zorder=6, label='County mean values')
+#     plt.grid(zorder=3)
+#     plt.xlim(22, 38)
+#     # plt.ylim(22, 38)
+#     # plt.xlim(22, 51)
+#     plt.ylim(22, 51)
+#     plt.plot([0, 51], [0, 51], 'k', zorder=7, label='1:1')
+#     plt.plot(np.sort(data['etbc']), res1.intercept + res1.slope * np.sort(data['etbc']),
+#              zorder=9, color='tab:pink', ls='dashed',
+#              label='y={:.2f}x+{:.1f} r^2: {:.2f}'.format(res1.slope, res1.intercept, res1.rvalue ** 2))
+#     plt.plot(np.sort(data['etbc']), res1a.intercept + res1a.slope * np.sort(data['etbc']),
+#              zorder=9, color='tab:purple', ls='dashed',
+#              label='y={:.2f}x+{:.1f} r^2: {:.2f}'.format(res1a.slope, res1a.intercept, res1a.rvalue ** 2))
+#     plt.xlabel('DNRC')
+#     plt.ylabel('Gridmet ETo (grass reference)')
+#     plt.legend()
+#
+#     def closest(sorted_dict, key):
+#         """ Return closest key in `sorted_dict` to given `key`. """
+#         assert len(sorted_dict) > 0
+#         keys = list(islice(sorted_dict.irange(minimum=key), 1))
+#         keys.extend(islice(sorted_dict.irange(maximum=key, reverse=True), 1))
+#         return min(keys, key=lambda k: abs(key - k))
+#
+#     conv = SortedDict(conv)
+#
+#     # CU comparison
+#     plt.subplot(132)
+#     plt.title("Average Seasonal ET (inches)")
+#     ys_etr_est = []
+#     for i in data['county'].unique():
+#         ys = 1.67 * data[data['county'] == i]['etos'] - 10.6
+#         plt.scatter(data[data['county'] == i]['etbc'], ys,
+#                     zorder=5, alpha=0.1, edgecolors='none', color='tab:blue', s=24)
+#         plt.scatter(np.mean(data[data['county'] == i]['etbc']), np.mean(ys),
+#                     color='k', edgecolors='none', s=12, zorder=6)
+#         ys_etr_est.append(np.mean(ys))
+#     # plt.plot(data['etbc'], data['etbc'], 'k', zorder=7)
+#     # plt.scatter(0, 0, color='k', edgecolors='none', s=12, zorder=6, label='County mean values')
+#     res2 = linregress(data['etbc'], 1.67 * data['etos'] - 10.6)
+#     res2a = linregress(xs_et, ys_etr_est)
+#     plt.plot(np.sort(data['etbc']), res2.intercept + res2.slope * np.sort(data['etbc']),
+#              zorder=9, color='tab:pink', ls='dashed',
+#              label='y={:.2f}x+{:.1f} r^2: {:.2f}'.format(res2.slope, res2.intercept, res2.rvalue ** 2))
+#     plt.plot(np.sort(data['etbc']), res2a.intercept + res2a.slope * np.sort(data['etbc']),
+#              zorder=9, color='tab:purple', ls='dashed',
+#              label='y={:.2f}x+{:.1f} r^2: {:.2f}'.format(res2a.slope, res2a.intercept, res2a.rvalue ** 2))
+#     plt.grid(zorder=3)
+#     plt.xlim(22, 38)
+#     # plt.ylim(22, 38)
+#     # plt.xlim(22, 51)
+#     plt.ylim(22, 51)
+#     plt.plot([0, 51], [0, 51], 'k', zorder=7)
+#     plt.xlabel('DNRC')
+#     plt.ylabel('Estimated Gridmet ETr (alfalfa reference)')
+#     plt.legend()
+#
+#     # CU comparison
+#     plt.subplot(133)
+#     plt.title("Average Seasonal ET (inches)")
+#     ys_etr = []
+#     for i in data['county'].unique():
+#         ys = [conv[closest(conv, j)] for j in data[data['county'] == i]['etos']]
+#         plt.scatter(data[data['county'] == i]['etbc'], ys,
+#                     zorder=5, alpha=0.1, edgecolors='none', color='tab:blue', s=24)
+#         plt.scatter(np.mean(data[data['county'] == i]['etbc']), np.mean(ys),
+#                     color='k', edgecolors='none', s=12, zorder=6)
+#         ys_etr.append(np.mean(ys))
+#     # plt.plot(data['etbc'], data['etbc'], 'k', zorder=7)
+#     # plt.scatter(0, 0, color='k', edgecolors='none', s=12, zorder=6, label='County mean values')
+#     res3 = linregress(data['etbc'], [conv[closest(conv, j)] for j in data['etos']])
+#     res3a = linregress(xs_et, ys_etr)
+#     plt.plot(np.sort(data['etbc']), res3.intercept + res3.slope * np.sort(data['etbc']),
+#              zorder=9, color='tab:pink', ls='dashed',
+#              label='y={:.2f}x+{:.1f} r^2: {:.2f}'.format(res3.slope, res3.intercept, res3.rvalue ** 2))
+#     plt.plot(np.sort(data['etbc']), res3a.intercept + res3a.slope * np.sort(data['etbc']),
+#              zorder=9, color='tab:purple', ls='dashed',
+#              label='y={:.2f}x+{:.1f} r^2: {:.2f}'.format(res3a.slope, res3a.intercept, res3a.rvalue ** 2))
+#     plt.grid(zorder=3)
+#     plt.xlim(22, 38)
+#     # plt.ylim(22, 38)
+#     # plt.xlim(22, 51)
+#     plt.ylim(22, 51)
+#     plt.plot([0, 51], [0, 51], 'k', zorder=7)
+#     plt.xlabel('DNRC')
+#     plt.ylabel('Gridmet ETr (alfalfa reference)')
+#     plt.legend()
+#
+#     plt.tight_layout()
+#
 
 
 def plot_results_frac(data):
@@ -2013,41 +2040,41 @@ def crop_stuff():
     # plt.ylabel('Number of Fields')
     # plt.tight_layout()
 
-    plt.figure()
-    plt.title('SID Fields by NASS Average Crop/Land Cover Type')
-    plt.bar(crop_cu['gen_crop'].value_counts().index, crop_cu['gen_crop'].value_counts().values,
-            label=crop_cu['gen_crop'].value_counts().index, color=clrs, zorder=3)
-    plt.grid(which='both', zorder=1)
-    plt.xticks([])
-    # plt.yticks()
-    # plt.xticks(color='w')
-    # plt.xticks(alpha=0)
-    # plt.tick_params(axis='x', rotation=45, ha='left')
-    # plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-    # plt.xticklabels(ha='left')
-    plt.ylabel('Number of Fields')
-    plt.xlabel('Crop/Land Cover Type')
-    plt.tight_layout()
-    plt.legend()
+    # plt.figure()
+    # plt.title('SID Fields by NASS Average Crop/Land Cover Type')
+    # plt.bar(crop_cu['gen_crop'].value_counts().index, crop_cu['gen_crop'].value_counts().values,
+    #         label=crop_cu['gen_crop'].value_counts().index, color=clrs, zorder=3)
+    # plt.grid(which='both', zorder=1)
+    # plt.xticks([])
+    # # plt.yticks()
+    # # plt.xticks(color='w')
+    # # plt.xticks(alpha=0)
+    # # plt.tick_params(axis='x', rotation=45, ha='left')
+    # # plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    # # plt.xticklabels(ha='left')
+    # plt.ylabel('Number of Fields')
+    # plt.xlabel('Crop/Land Cover Type')
+    # plt.tight_layout()
+    # plt.legend()
 
-    ys = [crop_cu[crop_cu['gen_crop'] == i]['area'].sum() for i in crop_cu['gen_crop'].value_counts().index]
-
-    plt.figure()
-    plt.title('SID Fields by NASS Average Crop/Land Cover Type')
-    plt.bar(crop_cu['gen_crop'].value_counts().index, ys,
-            label=crop_cu['gen_crop'].value_counts().index, color=clrs, zorder=3)
-    plt.grid(which='both', zorder=1)
-    plt.xticks([])
-    # plt.yticks()
-    # plt.xticks(color='w')
-    # plt.xticks(alpha=0)
-    # plt.tick_params(axis='x', rotation=45, ha='left')
-    # plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-    # plt.xticklabels(ha='left')
-    plt.ylabel('Irrigated Acreage')
-    plt.xlabel('Crop/Land Cover Type')
-    plt.tight_layout()
-    plt.legend()
+    # ys = [crop_cu[crop_cu['gen_crop'] == i]['area'].sum() for i in crop_cu['gen_crop'].value_counts().index]
+    #
+    # plt.figure()
+    # plt.title('SID Fields by NASS Average Crop/Land Cover Type')
+    # plt.bar(crop_cu['gen_crop'].value_counts().index, ys,
+    #         label=crop_cu['gen_crop'].value_counts().index, color=clrs, zorder=3)
+    # plt.grid(which='both', zorder=1)
+    # plt.xticks([])
+    # # plt.yticks()
+    # # plt.xticks(color='w')
+    # # plt.xticks(alpha=0)
+    # # plt.tick_params(axis='x', rotation=45, ha='left')
+    # # plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    # # plt.xticklabels(ha='left')
+    # plt.ylabel('Irrigated Acreage')
+    # plt.xlabel('Crop/Land Cover Type')
+    # plt.tight_layout()
+    # plt.legend()
 
     # plt.figure()
     # plt.title('SID Fields by NASS Average Crop Type/Land Cover')
@@ -2061,61 +2088,61 @@ def crop_stuff():
     #         autopct='%1.1f%%')
     # plt.tight_layout()
 
-    # # # # # # # # # # # #
-    # Number of fields
-    species = COUNTIES.keys()
-    weight_counts = {}
-    for crop in crop_cu['gen_crop'].value_counts().index:
-        vals = []
-        one_crop = crop_cu[crop_cu['gen_crop'] == crop]
-        for i in species:
-            vals.append(one_crop[one_crop['county'] == i]['gen_crop'].count())  # num fields
-        weight_counts[crop] = np.array(vals)
-
-    width = 0.9
-
-    fig, ax = plt.subplots(figsize=(12, 5))
-    bottom = np.zeros(52)
-
-    for boolean, weight_count in weight_counts.items():
-        ax.bar(species, weight_count, width, label=boolean, bottom=bottom, zorder=3)
-        bottom += weight_count
-
-    ax.grid(zorder=0)
-    ax.set_title('SID fields by County and Crop type')
-    # ax.legend(loc="upper right")
-    ax.tick_params(axis='x', rotation=90)
-    ax.set_xlabel('County')
-    ax.set_ylabel('Number of SID Fields')
-    ax.legend(title='Crop/Land Cover Type', ncol=2)
-
-    # Acreage
-    species = COUNTIES.keys()
-    weight_counts = {}
-    for crop in crop_cu['gen_crop'].value_counts().index:
-        vals = []
-        one_crop = crop_cu[crop_cu['gen_crop'] == crop]
-        for i in species:
-            vals.append(one_crop[one_crop['county'] == i]['area'].sum())
-        weight_counts[crop] = np.array(vals)
-
-    width = 0.9
-
-    fig, ax = plt.subplots(figsize=(12, 5))
-    bottom = np.zeros(52)
-
-    for boolean, weight_count in weight_counts.items():
-        ax.bar(species, weight_count, width, label=boolean, bottom=bottom, zorder=3)
-        bottom += weight_count
-
-    ax.grid(zorder=0)
-    ax.set_title('SID fields by County and Crop type')
-    # ax.legend(loc="upper right")
-    ax.tick_params(axis='x', rotation=90)
-    ax.set_xlabel('County')
-    ax.set_ylabel('Irrigated Acreage')
-    ax.legend(title='Crop/Land Cover Type', ncol=2)
-    # # # # # # # # # # # #
+    # # # # # # # # # # # # #
+    # # Number of fields
+    # species = COUNTIES.keys()
+    # weight_counts = {}
+    # for crop in crop_cu['gen_crop'].value_counts().index:
+    #     vals = []
+    #     one_crop = crop_cu[crop_cu['gen_crop'] == crop]
+    #     for i in species:
+    #         vals.append(one_crop[one_crop['county'] == i]['gen_crop'].count())  # num fields
+    #     weight_counts[crop] = np.array(vals)
+    #
+    # width = 0.9
+    #
+    # fig, ax = plt.subplots(figsize=(12, 5))
+    # bottom = np.zeros(52)
+    #
+    # for boolean, weight_count in weight_counts.items():
+    #     ax.bar(species, weight_count, width, label=boolean, bottom=bottom, zorder=3)
+    #     bottom += weight_count
+    #
+    # ax.grid(zorder=0)
+    # ax.set_title('SID fields by County and Crop type')
+    # # ax.legend(loc="upper right")
+    # ax.tick_params(axis='x', rotation=90)
+    # ax.set_xlabel('County')
+    # ax.set_ylabel('Number of SID Fields')
+    # ax.legend(title='Crop/Land Cover Type', ncol=2)
+    #
+    # # Acreage
+    # species = COUNTIES.keys()
+    # weight_counts = {}
+    # for crop in crop_cu['gen_crop'].value_counts().index:
+    #     vals = []
+    #     one_crop = crop_cu[crop_cu['gen_crop'] == crop]
+    #     for i in species:
+    #         vals.append(one_crop[one_crop['county'] == i]['area'].sum())
+    #     weight_counts[crop] = np.array(vals)
+    #
+    # width = 0.9
+    #
+    # fig, ax = plt.subplots(figsize=(12, 5))
+    # bottom = np.zeros(52)
+    #
+    # for boolean, weight_count in weight_counts.items():
+    #     ax.bar(species, weight_count, width, label=boolean, bottom=bottom, zorder=3)
+    #     bottom += weight_count
+    #
+    # ax.grid(zorder=0)
+    # ax.set_title('SID fields by County and Crop type')
+    # # ax.legend(loc="upper right")
+    # ax.tick_params(axis='x', rotation=90)
+    # ax.set_xlabel('County')
+    # ax.set_ylabel('Irrigated Acreage')
+    # ax.legend(title='Crop/Land Cover Type', ncol=2)
+    # # # # # # # # # # # # #
 
     # plt.figure()
     # plt.title('SID Fields by NASS Average Crop/Land Cover Type')
@@ -2133,27 +2160,149 @@ def crop_stuff():
     # plt.tight_layout()
     # plt.legend()
 
-    # plt.figure()
+    # plt.figure()  # each crop isolated
+    # plt.suptitle("Consumptive Use \"Overestimation\" (DNRC minus OpenET) by NASS Average Crop Type/Land Cover")
     # bins = np.arange(-10, 25)
+    # ymaxs = [2500, 1200, 600, 700, 500, 300, 250, 150, 70, 50]
     # for i in range(10):
     #     temp = crop_cu[crop_cu['gen_crop'] == types[i]]
     #     per_overest = 100 * len(temp[temp['dif'] > 0]) / len(temp)
-    #
-    #     # # Most crop types are distributed across most counties
-    #     # print(types[i])
-    #     # print("{} counties: ".format(len(temp['county'].unique())), sorted(temp['county'].unique()))
     #
     #     plt.subplot(2, 5, i+1)
     #     plt.title(types[i])
     #     plt.hist(crop_cu[crop_cu['gen_crop'] == types[i]]['dif'], bins=bins, zorder=3,
     #              label="{:.0f}%".format(per_overest))
-    #     plt.vlines(crop_cu[crop_cu['gen_crop'] == types[i]]['dif'].mean(), 0, 70, zorder=5,
-    #                label="{:.2f}".format(crop_cu[crop_cu['gen_crop'] == types[i]]['dif'].mean()),
+    #     plt.vlines(crop_cu[crop_cu['gen_crop'] == types[i]]['dif'].mean(), 0, ymaxs[i], zorder=5,
+    #                label="Mean: {:.2f} in".format(crop_cu[crop_cu['gen_crop'] == types[i]]['dif'].mean()),
     #                color='tab:orange')
+    #     if i % 5 == 0:
+    #         plt.ylabel('number of fields')
+    #     # if i > 4:
+    #     #     plt.xlabel('Consumptive Use Overestimation (DNRC minus OpenET)')
     #     plt.grid(zorder=1)
     #     plt.legend()
 
+    # plt.figure()  # With all data in background: Nice!
+    # plt.suptitle("Consumptive Use \"Overestimation\" (DNRC minus OpenET) by NASS Average Crop Type/Land Cover")
+    # per_overest_all = 100 * len(crop_cu[crop_cu['dif'] > 0]) / len(crop_cu)
+    # bins = np.arange(-10, 25)
+    # for i in range(10):
+    #     temp = crop_cu[crop_cu['gen_crop'] == types[i]]
+    #     per_overest = 100 * len(temp[temp['dif'] > 0]) / len(temp)
+    #
+    #     plt.subplot(2, 5, i + 1)
+    #     plt.title(types[i])
+    #     if i == 9:
+    #         plt.hist(crop_cu['dif'], bins=bins, zorder=2, color='lightgrey', alpha=0.8,
+    #                  label="{:.0f}% Over".format(per_overest_all))
+    #         plt.vlines(crop_cu['dif'].mean(), 0, 5000, zorder=3,
+    #                    label="All Fields Mean:  {:.2f} in".format(crop_cu['dif'].mean()),
+    #                    color='k', ls='dashed')
+    #     else:
+    #         plt.hist(crop_cu['dif'], bins=bins, zorder=2, color='lightgrey', alpha=0.8)
+    #         plt.vlines(crop_cu['dif'].mean(), 0, 5000, zorder=3,
+    #                    color='k', ls='dashed')
+    #     plt.hist(crop_cu[crop_cu['gen_crop'] == types[i]]['dif'], bins=bins, zorder=4,
+    #              label="{:.0f}% Over".format(per_overest), color=clrs[i])
+    #     plt.vlines(crop_cu[crop_cu['gen_crop'] == types[i]]['dif'].mean(), 0, 5000, zorder=5,
+    #                label="Crop Mean: {:.2f} in".format(crop_cu[crop_cu['gen_crop'] == types[i]]['dif'].mean()),
+    #                color=clrs[i], ls='dashed')
+    #     plt.vlines(0, 0, 5000, zorder=6, color='k')
+    #     if i % 5 == 0:
+    #         plt.ylabel('number of fields')
+    #     # if i > 4:
+    #     #     plt.xlabel('Consumptive Use Overestimation (DNRC minus OpenET)')
+    #     plt.grid(zorder=3)
+    #     plt.legend()
+    #     plt.xlim(-10, 25)
+    #     plt.ylim(0, 5000)
+
+    # plt.figure()  # DNRC vs OpenET
+    # plt.suptitle("Average Seasonal Consumptive Use (inches) by NASS Average Crop Type/Land Cover")
+    # bins = np.arange(0, 30)
+    # ymaxs = [3000, 1200, 800, 1000, 600, 350, 450, 170, 120, 120]
+    # for i in range(10):
+    #     temp = crop_cu[crop_cu['gen_crop'] == types[i]]
+    #
+    #     plt.subplot(2, 5, i + 1)
+    #     plt.title(types[i])
+    #     plt.hist(temp['dnrc_cu'], bins=bins, zorder=2, color='lightgrey', alpha=0.8)
+    #     plt.vlines(temp['dnrc_cu'].mean(), 0, ymaxs[i], zorder=3,
+    #                label="DNRC Mean:  {:.2f} in".format(crop_cu['dnrc_cu'].mean()),
+    #                color=clrs[i], ls='dashed')
+    #     plt.hist(temp['opnt_cu'], bins=bins, zorder=4, color=clrs[i], alpha=0.8)
+    #     plt.vlines(temp['opnt_cu'].mean(), 0, ymaxs[i], zorder=5,
+    #                label="OpenET Mean: {:.2f} in".format(crop_cu[crop_cu['gen_crop'] == types[i]]['opnt_cu'].mean()),
+    #                color='k', ls='dashed')
+    #     # plt.vlines(0, 0, 5000, zorder=6, color='k')
+    #     if i % 5 == 0:
+    #         plt.ylabel('number of fields')
+    #     # if i > 4:
+    #     #     plt.xlabel('Consumptive Use Overestimation (DNRC minus OpenET)')
+    #     plt.grid(zorder=3)
+    #     plt.legend()
+    #     # plt.xlim(-10, 25)
+    #     # plt.ylim(0, 5000)
+
     # plt.figure()
+    # plt.suptitle("OpenET Average Seasonal Consumptive Use (inches) by NASS Average Crop Type/Land Cover")
+    # bins = np.arange(0, 30)
+    # for i in range(10):
+    #     plt.subplot(2, 5, i + 1)
+    #     plt.title(types[i])
+    #     if i == 9:
+    #         plt.hist(crop_cu['opnt_cu'], bins=bins, zorder=2, color='lightgrey', alpha=0.8)
+    #         plt.vlines(crop_cu['opnt_cu'].mean(), 0, 6000, zorder=3,
+    #                    label="All Fields Mean:  {:.2f} in".format(crop_cu['opnt_cu'].mean()),
+    #                    color='k', ls='dashed')
+    #     else:
+    #         plt.hist(crop_cu['opnt_cu'], bins=bins, zorder=2, color='lightgrey', alpha=0.8)
+    #         plt.vlines(crop_cu['opnt_cu'].mean(), 0, 6000, zorder=3,
+    #                    color='k', ls='dashed')
+    #     plt.hist(crop_cu[crop_cu['gen_crop'] == types[i]]['opnt_cu'], bins=bins, zorder=4, color=clrs[i])
+    #     plt.vlines(crop_cu[crop_cu['gen_crop'] == types[i]]['opnt_cu'].mean(), 0, 6000, zorder=5,
+    #                label="Crop Mean: {:.2f} in".format(crop_cu[crop_cu['gen_crop'] == types[i]]['opnt_cu'].mean()),
+    #                color=clrs[i], ls='dashed')
+    #     # plt.vlines(0, 0, 5000, zorder=6, color='k')
+    #     if i % 5 == 0:
+    #         plt.ylabel('number of fields')
+    #     # if i > 4:
+    #     #     plt.xlabel('Consumptive Use Overestimation (DNRC minus OpenET)')
+    #     plt.grid(zorder=3)
+    #     plt.legend()
+    #     plt.xlim(0, 30)
+    #     plt.ylim(0, 6000)
+
+    plt.figure()  # With all data in background: Nice!
+    plt.suptitle("DNRC Average Seasonal Consumptive Use (inches) by NASS Average Crop Type/Land Cover")
+    bins = np.arange(0, 30)
+    for i in range(10):
+        plt.subplot(2, 5, i + 1)
+        plt.title(types[i])
+        if i == 9:
+            plt.hist(crop_cu['dnrc_cu'], bins=bins, zorder=2, color='lightgrey', alpha=0.8)
+            plt.vlines(crop_cu['dnrc_cu'].mean(), 0, 6500, zorder=3,
+                       label="All Fields Mean:  {:.2f} in".format(crop_cu['dnrc_cu'].mean()),
+                       color='k', ls='dashed')
+        else:
+            plt.hist(crop_cu['dnrc_cu'], bins=bins, zorder=2, color='lightgrey', alpha=0.8)
+            plt.vlines(crop_cu['dnrc_cu'].mean(), 0, 6500, zorder=3,
+                       color='k', ls='dashed')
+        plt.hist(crop_cu[crop_cu['gen_crop'] == types[i]]['dnrc_cu'], bins=bins, zorder=4, color=clrs[i])
+        plt.vlines(crop_cu[crop_cu['gen_crop'] == types[i]]['dnrc_cu'].mean(), 0, 6500, zorder=5,
+                   label="Crop Mean: {:.2f} in".format(crop_cu[crop_cu['gen_crop'] == types[i]]['dnrc_cu'].mean()),
+                   color=clrs[i], ls='dashed')
+        # plt.vlines(0, 0, 5000, zorder=6, color='k')
+        if i % 5 == 0:
+            plt.ylabel('number of fields')
+        # if i > 4:
+        #     plt.xlabel('Consumptive Use Overestimation (DNRC minus OpenET)')
+        plt.grid(zorder=3)
+        plt.legend()
+        plt.xlim(0, 30)
+        plt.ylim(0, 6500)
+
+    # plt.figure()  # Bad, muddy
     # plt.title("Consumptive Use Estimate (Inches)")
     # for i in range(10):
     #     temp = crop_cu[crop_cu['gen_crop'] == types[i]]
@@ -2174,14 +2323,14 @@ def crop_stuff():
     # for i in range(10):
     #     temp = crop_cu[crop_cu['gen_crop'] == types[i]]
     #     plt.subplot(2, 5, i+1)
-    #     plt.scatter(temp['dnrc_cu'], temp['opnt_cu'], zorder=5,  color=clrs[i], edgecolors='none',
+    #     plt.scatter(temp['dnrc_cu'], temp['opnt_cu'], zorder=4,  color=clrs[i], edgecolors='none',
     #                 alpha=0.1, label="{} ({:.1f}%)".format(types[i], 100*len(temp)/len(crop_cu)))
     #     plt.scatter(crop_cu['dnrc_cu'], crop_cu['opnt_cu'], zorder=3, color='lightgrey', edgecolors='none',
     #                 alpha=0.1, label='All Crops')
     #     plt.grid(zorder=1)
     #     plt.xlim(0, 30)
     #     plt.ylim(0, 30)
-    #     plt.plot([0, 30], [0, 30], 'k', zorder=4)
+    #     plt.plot([0, 30], [0, 30], 'k', zorder=5)
     #     if i == 0 or i == 5:
     #         plt.ylabel('OpenET')
     #     if i > 4:
@@ -2314,69 +2463,387 @@ if __name__ == '__main__':
     # print(static_avg.index)
     # print(static_avg[static_avg.index == '001']['dnrc_cu'])
 
-    # # Establish sqlite connection
-    # conec = sqlite3.connect(os.path.join(main_dir, "opnt_analysis_03042024_Copy.db"))  # full project
-    # # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/random_05082024.db")  # test
-    #
-    # # extract data
-    # # gm_ct = gridmet_ct(conec)
-    # # print(gm_ct)
-    # # sum_data(conec, irrmapper=1, save="C:/Users/CND571/Documents/Data")
-    #
-    # # gm_data = gridmet_refet(conec)
-    #
-    # # checking time format
-    # cursor = conec.cursor()
-    # # # This works. Why do other dates not? (ex: '2021-06-28'
-    # # cursor.execute("SELECT time, fid, acres FROM opnt_etof WHERE date(time)=date('{}')".format('1985-01-01'))
-    # # # cursor.execute("SELECT time, fid, acres FROM opnt_etof")
-    # # print(cursor.fetchone())
-    # # cursor.execute("SELECT count(fid) FROM opnt_etof WHERE date(time)=date('{}')".format('1985-01-01'))
-    # # # Okay, that's the right number of results, I think. Too small?
-    # # print(cursor.fetchone())
-    #
-    # # cursor.execute("SELECT DISTINCT fid, acres FROM opnt_etof")
-    # # # cursor.execute("SELECT time, fid, acres FROM opnt_etof")
-    # # print(cursor.fetchone())
-    # # stuff = cursor.fetchall()
-    # # print(len(stuff))
-    # # cursor.execute("SELECT DISTINCT count(fid) FROM opnt_etof")
+    # Establish sqlite connection
+    conec = sqlite3.connect(os.path.join(main_dir, "opnt_analysis_03042024_Copy1.db"))  # full project
+    # conec = sqlite3.connect("C:/Users/CND571/Documents/Data/random_05082024.db")  # test
+
+    # extract data
+    # gm_ct = gridmet_ct(conec)
+    # print(gm_ct)
+    # sum_data(conec, irrmapper=1, save="C:/Users/CND571/Documents/Data")
+
+    # gm_data = gridmet_refet(conec)
+
+    # checking time format
+    cursor = conec.cursor()
+    # # This works. Why do other dates not? (ex: '2021-06-28'
+    # cursor.execute("SELECT time, fid, acres FROM opnt_etof WHERE date(time)=date('{}')".format('1985-01-01'))
+    # # cursor.execute("SELECT time, fid, acres FROM opnt_etof")
+    # print(cursor.fetchone())
+    # cursor.execute("SELECT count(fid) FROM opnt_etof WHERE date(time)=date('{}')".format('1985-01-01'))
     # # Okay, that's the right number of results, I think. Too small?
-    # # print(cursor.fetchone())
-    #
+    # print(cursor.fetchone())
+
+    # cursor.execute("SELECT DISTINCT fid, acres FROM opnt_etof")
+    # # cursor.execute("SELECT time, fid, acres FROM opnt_etof")
+    # print(cursor.fetchone())
+    # stuff = cursor.fetchall()
+    # print(len(stuff))
+    # cursor.execute("SELECT DISTINCT count(fid) FROM opnt_etof")
+    # Okay, that's the right number of results, I think. Too small?
+    # print(cursor.fetchone())
+
     # areas = pd.read_sql("SELECT DISTINCT fid, acres FROM opnt_etof", conec)
     # areas.to_csv("C:/Users/CND571/Documents/Data/SID_areas.csv")
     # # areas = pd.read_sql("SELECT fid, acres FROM opnt_etof WHERE time={}".format("6/1/2020"), conec)
     # print(areas)
-    #
-    # # time_series_data(conec, main_dir)
-    #
-    # # por_data = sum_data(conec)
-    #
-    # # close connection
-    # conec.close()
+
+    # time_series_data(conec, main_dir)
+
+    # por_data = sum_data(conec)
+    sum_data(conec, start=1997, end=2006, save=main_dir)
+
+    # close connection
+    conec.close()
+
+    # main_loc = "C:/Users/CND571/OneDrive - MT/Documents/Projects/OpenET/results"
+
+    # etos = np.loadtxt(os.path.join(main_loc, "all_gm_eto_20240709.txt"))
+    # etrs = np.loadtxt(os.path.join(main_loc, "all_gm_etr_20240709.txt"))
+    # gm_data = dict(zip(etos, etrs))
+    # print(gm_data)
 
     # por_data_im = pd.read_csv("C:/Users/CND571/Documents/Data/cu_results_1987_2023_im1_mf1997-2006.csv",
     #                           dtype={'county': str}, index_col='fid')
-    por_data = pd.read_csv("C:/Users/CND571/Documents/Data/cu_results_1987_2023_im0_mf1997-2006.csv",
+    por_data = pd.read_csv(os.path.join(main_dir, "cu_results_1987_2023_im0_mf1997-2006.csv"),
                            dtype={'county': str}, index_col='fid')
-    iwr_data = pd.read_csv("C:/Users/CND571/Documents/Data/iwr_cu_results_mf1997-2006.csv",
+    data_9706 = pd.read_csv(os.path.join(main_dir, "cu_results_1997_2006_im0_mf1997-2006.csv"),
+                            dtype={'county': str}, index_col='fid')
+    iwr_data = pd.read_csv(os.path.join(main_dir, "iwr_cu_results_mf1997-2006.csv"),
                            dtype={'county': str}, index_col='fid')
-    # print(por_data.columns)
-    # print(iwr_data.columns)
+    iwr_data = iwr_data[iwr_data.index.isin(data_9706.index)]  # removing fields that don't have analysis
+
+    print(por_data.columns)
+    print(data_9706.columns)
+    print(iwr_data.columns)
+
+    # for variable in ['etos', 'etbc', 'etof', 'opnt_cu', 'dnrc_cu']:
+    #     plt.figure(figsize=(5, 5))
+    #     plt.title(variable)
+    #     plt.scatter(por_data[variable], data_9706[variable])
+    #     plt.grid()
+    #     plt.xlim(0.0, max(np.max(por_data[variable]), np.max(data_9706[variable])))
+    #     plt.ylim(0.0, max(np.max(por_data[variable]), np.max(data_9706[variable])))
+    #     plt.xlabel('por_data')
+    #     plt.ylabel('data_9706')
+
+    # bot = 20
+    # top = 55
+    #
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # plt.title('ET')
+    # plt.scatter(iwr_data['etbc'], data_9706['etrs'], zorder=2)
+    # plt.grid(zorder=0)
+    # # top = max(np.max(iwr_data['etbc']), np.max(data_9706['etrs'])) + 1
+    # # bot = min(np.min(iwr_data['etbc']), np.min(data_9706['etrs'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # plt.xlabel('iwr')
+    # plt.ylabel('etr')
+    #
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # plt.title('ET')
+    # plt.scatter(iwr_data['etbc'], data_9706['etos'], zorder=2)
+    # plt.grid(zorder=0)
+    # # top = max(np.max(iwr_data['etbc']), np.max(data_9706['etos'])) + 1
+    # # bot = min(np.min(iwr_data['etbc']), np.min(data_9706['etos'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # plt.xlabel('iwr')
+    # plt.ylabel('eto')
+    #
+    # bot = 20
+    # top = 38
+    #
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # dif = np.mean(- iwr_data['etbc'] + data_9706['etbc'])
+    # plt.title(f'ET dif={dif:.2f}')
+    # plt.scatter(iwr_data['etbc'], data_9706['etbc'], zorder=2)
+    # plt.grid(zorder=0)
+    # # top = max(np.max(iwr_data['etbc']), np.max(data_9706['etbc'])) + 1
+    # # bot = min(np.min(iwr_data['etbc']), np.min(data_9706['etbc'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # plt.xlabel('iwr')
+    # plt.ylabel('dnrc 9706')
+    #
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # dif = np.mean(- iwr_data['etbc'] + por_data['etbc'])
+    # plt.title(f'ET dif={dif:.2f}')
+    # plt.scatter(iwr_data['etbc'], por_data['etbc'], zorder=2)
+    # plt.grid(zorder=0)
+    # # top = max(np.max(iwr_data['etbc']), np.max(por_data['etbc'])) + 1
+    # # bot = min(np.min(iwr_data['etbc']), np.min(por_data['etbc'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # plt.xlabel('iwr')
+    # plt.ylabel('dnrc por')
+
+    # bot = 0
+    # top = 1.1
+    #
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # plt.title('ETf')
+    # plt.scatter(iwr_data['mfs'], data_9706['etrf'], zorder=2)
+    # plt.grid(zorder=0)
+    # # top = max(np.max(iwr_data['etbc']), np.max(data_9706['etrs'])) + 1
+    # # bot = min(np.min(iwr_data['etbc']), np.min(data_9706['etrs'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # plt.xlabel('iwr mf')
+    # plt.ylabel('etrf')
+    #
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # plt.title('ETf')
+    # plt.scatter(iwr_data['mfs'], data_9706['etof'], zorder=2)
+    # plt.grid(zorder=0)
+    # # top = max(np.max(iwr_data['etbc']), np.max(data_9706['etos'])) + 1
+    # # bot = min(np.min(iwr_data['etbc']), np.min(data_9706['etos'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # plt.xlabel('iwr mf')
+    # plt.ylabel('etof')
+
+    bot = -5
+    top = 30
+
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # dif = np.mean(- data_9706['dnrc_cu'] + data_9706['opnt_cu'])
+    # plt.title(f'CU dif={dif:.2f}')
+    # plt.scatter(data_9706['dnrc_cu'], data_9706['opnt_cu'], zorder=2)
+    # plt.grid(zorder=0)
+    # top = max(np.max(data_9706['dnrc_cu']), np.max(data_9706['opnt_cu'])) + 1
+    # bot = min(np.min(data_9706['dnrc_cu']), np.min(data_9706['opnt_cu'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # plt.xlabel('dnrc 9706')
+    # plt.ylabel('opnt 9706')
+    #
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # dif = np.mean(- por_data['dnrc_cu'] + por_data['opnt_cu'])
+    # plt.title(f'CU dif={dif:.2f}')
+    # plt.scatter(por_data['dnrc_cu'], por_data['opnt_cu'], zorder=2)
+    # plt.grid(zorder=0)
+    # top = max(np.max(por_data['dnrc_cu']), np.max(por_data['opnt_cu'])) + 1
+    # bot = min(np.min(por_data['dnrc_cu']), np.min(por_data['opnt_cu'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # plt.xlabel('dnrc por')
+    # plt.ylabel('opnt por')
+
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # dif = np.mean(- iwr_data['dnrc_cu'] + data_9706['opnt_cu'])
+    # plt.title(f'CU dif={dif:.2f}')
+    # plt.scatter(iwr_data['dnrc_cu'], data_9706['opnt_cu'], zorder=2)
+    # plt.grid(zorder=0)
+    # # top = max(np.max(iwr_data['dnrc_cu']), np.max(data_9706['opnt_cu'])) + 1
+    # # bot = min(np.min(iwr_data['dnrc_cu']), np.min(data_9706['opnt_cu'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # plt.xlabel('iwr')
+    # plt.ylabel('opnt 9706')
+    #
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # dif = np.mean(- iwr_data['dnrc_cu'] + por_data['opnt_cu'])
+    # plt.title(f'CU dif={dif:.2f}')
+    # plt.scatter(iwr_data['dnrc_cu'], por_data['opnt_cu'], zorder=2)
+    # plt.grid(zorder=0)
+    # # top = max(np.max(iwr_data['dnrc_cu']), np.max(por_data['opnt_cu'])) + 1
+    # # bot = min(np.min(iwr_data['dnrc_cu']), np.min(por_data['opnt_cu'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # plt.xlabel('iwr')
+    # plt.ylabel('opnt por')
+
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # dif = np.mean(- por_data['dnrc_cu'] + data_9706['dnrc_cu'])
+    # plt.title(f'CU dif={dif:.2f}')
+    # plt.scatter(por_data['dnrc_cu'], data_9706['dnrc_cu'], zorder=2)
+    # plt.grid(zorder=0)
+    # top = max(np.max(por_data['dnrc_cu']), np.max(data_9706['dnrc_cu'])) + 1
+    # bot = min(np.min(por_data['dnrc_cu']), np.min(data_9706['dnrc_cu'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # plt.xlabel('dnrc por')
+    # plt.ylabel('dnrc 9706')
+
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # dif = np.mean(- por_data['opnt_cu'] + data_9706['opnt_cu'])
+    # plt.title(f'CU dif={dif:.2f}')
+    # plt.scatter(por_data['opnt_cu'], data_9706['opnt_cu'], zorder=2)
+    # plt.grid(zorder=0)
+    # top = max(np.max(por_data['opnt_cu']), np.max(data_9706['opnt_cu'])) + 1
+    # bot = min(np.min(por_data['opnt_cu']), np.min(data_9706['opnt_cu'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # # these are both 0.12% ?
+    # plt.xlabel(f'opnt por ({len(por_data[por_data['opnt_cu'] < 0])}, '
+    #            f'{100*len(por_data[por_data['opnt_cu'] < 0])/len(por_data):.2f}% neg values)')
+    # plt.ylabel(f'opnt 9706 ({len(data_9706[data_9706['opnt_cu'] < 0])}, '
+    #            f'{100*len(data_9706[data_9706['opnt_cu'] < 0])/len(data_9706):.2f}% neg values)')
+    # # plt.xlabel(f'opnt por ({len(data_9706[data_9706['opnt_cu'] < 0])} neg values)')
+    # # plt.ylabel(f'opnt 9706 ({len(data_9706[data_9706['opnt_cu'] < 0])} neg values)')
+
+    print(f'opnt por: {len(por_data[por_data['opnt_cu'] < 0])}, '
+          f'{100*len(por_data[por_data['opnt_cu'] < 0])/len(por_data):.2f}% neg values')
+    print(f'opnt 9706: {len(data_9706[data_9706['opnt_cu'] < 0])}, '
+          f'{100*len(data_9706[data_9706['opnt_cu'] < 0])/len(data_9706):.2f}% neg values')
+    # None are actually equal to zero. All are less
+
+    # data_9706['opnt_cu'] = data_9706['opnt_cu'].where(data_9706['opnt_cu'] > 0)
+    # por_data['opnt_cu'] = por_data['opnt_cu'].where(por_data['opnt_cu'] > 0)
+    # # removing the negative values changed the results by one-hundredth of an inch each.
+    #
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # dif = np.mean(- iwr_data['dnrc_cu'] + data_9706['opnt_cu'])
+    # plt.title(f'CU dif={dif:.2f}')
+    # plt.scatter(iwr_data['dnrc_cu'], data_9706['opnt_cu'], zorder=2)
+    # plt.grid(zorder=0)
+    # # top = max(np.max(iwr_data['dnrc_cu']), np.max(data_9706['opnt_cu'])) + 1
+    # # bot = min(np.min(iwr_data['dnrc_cu']), np.min(data_9706['opnt_cu'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # plt.xlabel('iwr')
+    # plt.ylabel('opnt 9706')
+    #
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # dif = np.mean(- iwr_data['dnrc_cu'] + por_data['opnt_cu'])
+    # plt.title(f'CU dif={dif:.2f}')
+    # plt.scatter(iwr_data['dnrc_cu'], por_data['opnt_cu'], zorder=2)
+    # plt.grid(zorder=0)
+    # # top = max(np.max(iwr_data['dnrc_cu']), np.max(por_data['opnt_cu'])) + 1
+    # # bot = min(np.min(iwr_data['dnrc_cu']), np.min(por_data['opnt_cu'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # plt.xlabel('iwr')
+    # plt.ylabel('opnt por')
+
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # dif = np.mean(- iwr_data['dnrc_cu'] + data_9706['dnrc_cu'])
+    # plt.title(f'CU dif={dif:.2f}')
+    # plt.scatter(iwr_data['dnrc_cu'], data_9706['dnrc_cu'], zorder=2)
+    # plt.grid(zorder=0)
+    # top = max(np.max(iwr_data['dnrc_cu']), np.max(data_9706['dnrc_cu'])) + 1
+    # bot = min(np.min(iwr_data['dnrc_cu']), np.min(data_9706['dnrc_cu'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # plt.xlabel('iwr')
+    # plt.ylabel('dnrc 9706')
+
+    # plt.figure(figsize=(6, 6), dpi=200)
+    # dif = np.mean(- iwr_data['dnrc_cu'] + por_data['dnrc_cu'])
+    # plt.title(f'CU dif={dif:.2f}')
+    # plt.scatter(iwr_data['dnrc_cu'], por_data['dnrc_cu'], zorder=2)
+    # plt.grid(zorder=0)
+    # top = max(np.max(iwr_data['dnrc_cu']), np.max(por_data['dnrc_cu'])) + 1
+    # bot = min(np.min(iwr_data['dnrc_cu']), np.min(por_data['dnrc_cu'])) - 1
+    # plt.xlim(bot, top)
+    # plt.ylim(bot, top)
+    # # plt.xlim()
+    # # plt.ylim()
+    # plt.plot([bot, top], [bot, top], 'k', zorder=3)
+    # plt.xlabel('iwr')
+    # plt.ylabel('dnrc por')
+
 
     # ts_df = pd.read_csv(os.path.join(main_dir, 'ts_6yrs_im0_mf1997-2006.csv'),
     #                     dtype={'county': str})  # , index_col=['county', 'st_year'])
     # print(ts_df)
     # print(ts_df.columns)
 
-    # areas = pd.read_csv("C:/Users/CND571/Documents/Data/SID_areas.csv", index_col='fid')
+    # # areas = pd.read_csv("C:/Users/CND571/Documents/Data/SID_areas.csv", index_col='fid')
     areas = pd.read_csv("C:/Users/CND571/Documents/Data/SID_areas.csv")  # starts at 56531
     areas = areas.drop_duplicates(subset=['fid'])  # this goes to 39214 when index is assigned first, stays the same otherwise.
     areas.index = areas['fid']
     areas = areas.drop(columns=['Unnamed: 0', 'fid'])
+    areas['county'] = [i[:3] for i in areas.index]
+    # print(areas[areas['county']!='101'])
+    print(areas)
+    # print(data_9706)
+    # print(iwr_data)
 
-    # print(areas)
+    print()
+    data_9706['area'] = areas['acres']
+    iwr_data['area'] = areas['acres']
+    por_data['area'] = areas['acres']
+
+    print(data_9706)
+    print(iwr_data)
+
+    data_9706['af'] = (data_9706['opnt_cu'] / 12) * data_9706['area']
+    iwr_data['af'] = (iwr_data['dnrc_cu'] / 12) * iwr_data['area']
+    por_data['af'] = (por_data['opnt_cu'] / 12) * por_data['area']
+
+    print(data_9706)
+    print(iwr_data)
+
+    print(data_9706['af'].sum())
+    print(iwr_data['af'].sum())
+    print(por_data['af'].sum())
+    print(iwr_data['af'].sum() - data_9706['af'].sum())
+    print(iwr_data['af'].sum() - por_data['af'].sum())
+    print(por_data['af'].sum() - data_9706['af'].sum())
+    # print(100*(iwr_data['af'].sum() - data_9706['af'].sum())/data_9706['af'].sum())
+    print(100*(iwr_data['af'].sum() - data_9706['af'].sum())/iwr_data['af'].sum())
+    # print(100*(iwr_data['af'].sum() - por_data['af'].sum())/por_data['af'].sum())
+    print(100*(iwr_data['af'].sum() - data_9706['af'].sum())/iwr_data['af'].sum())
+    # print(100 * (iwr_data['af'].sum() - por_data['af'].sum()) / por_data['af'].sum())
+    print(100 * (por_data['af'].sum() - data_9706['af'].sum()) / por_data['af'].sum())  # 0.2% difference in total consuptive use
 
     # time_series_plot(ts_df, iwr_data, var='etbc')
     # time_series_plot(ts_df, iwr_data, var='dnrc_cu')
@@ -2398,19 +2865,21 @@ if __name__ == '__main__':
     # neg_cu_dif = (por_data['dnrc_cu']-por_data['opnt_cu']).lt(0).sum()
     # print(neg_cu_dif)
 
+    # three_scatterplots_2(data_9706, iwr_data)  # same as line above, but adds comparison of differences in ET vs CU.
+
     # plot_results_2(por_data)  # this looks good. Daily values for DNRC
     # three_scatterplots_1(por_data)  # same as line above, but adds comparison of differences in ET vs CU.
     # three_densityplots_1(por_data)  # same as line above, but is a density plot w/ different colors.
-    # plot_results_2_1(por_data, gm_data)
+    # plot_results_2_1(por_data, gm_data)  # uses sorteddict, can't do that right now.
     # plot_results_frac(por_data) # includes etof, doesn't look great.
     # plot_results_3(por_data, iwr_data)  # climate values for DNRC
     # three_scatterplots_2(por_data, iwr_data)  # same as line above, but adds comparison of differences in ET vs CU.
-    three_densityplots_2(por_data, iwr_data)  # same as line above, but is a density plot w/ different colors.
+    # three_densityplots_2(por_data, iwr_data)  # same as line above, but is a density plot w/ different colors.
     # county_hist(por_data, iwr_data, selection=('029',), val=500)
     # county_hist(por_data, iwr_data, selection=('047',))  # , val=500)
     # county_hist(por_data, iwr_data, selection=('067',))
     # dif_hist(por_data)  # this looks good
-    # dif_hist_1(por_data, iwr_data)  # this has (most) of the data I need
+    # dif_hist_1(data_9706, iwr_data)  # this has (most) of the data I need
     # dif_hist_2(por_data, iwr_data)
     # scatter(por_data)  # this is nice
     # all_hist_1(por_data, iwr_data)  # single plot, all fields
@@ -2436,7 +2905,7 @@ if __name__ == '__main__':
     # county_scatter_1_et(por_data, por_data_im, iwr_data)  # 1 ET scatterplot for each of 52 counties
 
     # # Adding some crop stuff
-    # crop_stuff()  # crs is broken... I guess I couldn't just ignore the problem.
+    # crop_stuff()
 
     # print(areas)
     # print(por_data)

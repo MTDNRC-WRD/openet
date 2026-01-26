@@ -1,30 +1,32 @@
 
+import datetime as dt
 import os
+
+import matplotlib.pyplot as plt
 import pandas as pd
 import requests
 from tqdm import tqdm
-import matplotlib.pyplot as plt
-from datetime import timedelta
-import datetime as dt
 
-# from run_all import COUNTIES
+from run_all import COUNTIES
 
 SPLIT = ['047', '111', '099', '081', '073', '105', '031', '049', '067', '097']
 
 
-def openet_get_fields_export(fields, start, end, et_too=False, show=False,
+def openet_get_fields_export(fields, start, end, et_too=False, show=False, interval='daily',
                              api_key='C:/Users/CND571/Documents/Haugen_Montana_API.txt'):
     """ Uses OpenET API multipolygon export endpoint to get etof data given a Google Earth Engine asset.
 
-    Files will be exported to user's Google Drive; this is dependent on linking OpenET account to a Google account
-    (I think).
+    Files will be exported to user's Google Drive; this is dependent on linking OpenET account to a Google Earth Engine
+    account. Otherwise, use "openet_download_links()" below to print links to download the exported files.
 
     Parameters
     ----------
-    fields: path to gee asset, form of 'projects/cloud_project/assets/asset_filename'
-    start: beginning of period of study, 'YYYY-MM-DD' format
-    end: end of period of study, 'YYYY-MM-DD' format
+    fields: str, path to gee asset, form of 'projects/cloud_project/assets/asset_filename'
+    start: str, beginning of period of study, 'YYYY-MM-DD' format
+    end: str, end of period of study, 'YYYY-MM-DD' format
     et_too: bool, optional; if True, also download OpenET ensemble ET over same time period and set of fields
+    show: bool, optional; prints the arguments used in the api call
+    interval: str, optional;
     api_key: str, optional; path to local .txt file where API key from user's OpenET account is stored.
     Key is first line in file.
     """
@@ -41,22 +43,41 @@ def openet_get_fields_export(fields, start, end, et_too=False, show=False,
     # set your API key before making the request
     header = {"Authorization": api_key}
 
+    # # endpoint arguments
+    # args = {
+    #     "date_range": [
+    #         start,
+    #         end
+    #     ],
+    #     "interval": "monthly",
+    #     "asset_id": fields,
+    #     "attributes": [
+    #         "FID"
+    #     ],
+    #     "reducer": "mean",
+    #     "model": "Ensemble",
+    #     "variable": "ETof",  # "ETof" or "ET"
+    #     "reference_et": "gridMET",
+    #     "units": "in"
+    # }
+
     # endpoint arguments
     args = {
         "date_range": [
             start,
             end
         ],
-        "interval": "monthly",
+        "interval": interval,
         "asset_id": fields,
         "attributes": [
-            "FID"
+            "id"
         ],
         "reducer": "mean",
+        "overpass": "True",
         "model": "Ensemble",
         "variable": "ETof",  # "ETof" or "ET"
         "reference_et": "gridMET",
-        "units": "in"
+        "units": "mm"
     }
 
     if show:
@@ -66,7 +87,8 @@ def openet_get_fields_export(fields, start, end, et_too=False, show=False,
     resp = requests.post(
         headers=header,
         json=args,
-        url="https://openet-api-montana-ic5gyecbva-uw.a.run.app/raster/export/multipolygon"
+        url="https://openet-api.org/raster/export/multipolygon"
+        # url="https://openet-api-montana-ic5gyecbva-uw.a.run.app/raster/export/multipolygon"
     )
     print(resp.json())
     # response = resp.json()
@@ -79,9 +101,53 @@ def openet_get_fields_export(fields, start, end, et_too=False, show=False,
         resp = requests.post(
             headers=header,
             json=args,
-            url="https://openet-api-montana-ic5gyecbva-uw.a.run.app/raster/export/multipolygon"
+            url="https://openet-api.org/raster/export/multipolygon"
+            # url="https://openet-api-montana-ic5gyecbva-uw.a.run.app/raster/export/multipolygon"
         )
         print(resp.json())
+
+
+def openet_track_export(job_id, api_key='C:/Users/CND571/Documents/Haugen_Montana_API.txt'):
+    """ Uses OpenET's raster/export/track endpoint to track progress on submitted jobs. """
+    with open(api_key, 'r') as f:
+        api_key = f.readline()
+
+    # set your API key before making the request
+    header = {"Authorization": api_key}
+
+    # endpoint arguments
+    args = {
+        "tracking_id": job_id
+    }
+
+    # query the api
+    resp = requests.get(
+        headers=header,
+        params=args,
+        url="https://openet-api-montana-ic5gyecbva-uw.a.run.app/raster/export/track"
+    )
+
+    print(resp.json())
+
+
+def openet_download_links(api_key='C:/Users/CND571/Documents/Haugen_Montana_API.txt'):
+    """ Uses OpenET's Account Storage endpoint to print links to download exported data when no GEE account is linked.
+
+    Uses custom Montana api portal/server. Not sure the longevity of that link.
+    """
+    with open(api_key, 'r') as f:
+        api_key = f.readline()
+
+    # set your API key before making the request
+    header = {"Authorization": api_key}
+
+    # query the api
+    resp = requests.get(
+        headers=header,
+        url="https://openet-api-montana-ic5gyecbva-uw.a.run.app/account/storage"
+    )
+
+    print(resp.json())
 
 
 def get_all_openet_etof_data():
@@ -96,12 +162,12 @@ def get_all_openet_etof_data():
     # Period of record for OpenET final data: 2016, provisional back to 1985.
     # start_por, end_por = "1985-01-01", "2023-12-31"
     # Fetching old and new data separately to prevent timeouts.
-    old_start, old_end = "1985-01-01", "2015-12-31"
+    old_start, old_end = "1991-01-01", "2015-12-31"
     new_start, new_end = "2016-01-01", "2023-12-31"
     for i in tqdm(gee_county_files, total=len(gee_county_files)):
         gee_asset = 'projects/ee-hehaugen/assets/SID_15FEB2024/{}'.format(i)
-        openet_get_fields_export(gee_asset, old_start, old_end)
-        openet_get_fields_export(gee_asset, new_start, new_end)
+        openet_get_fields_export(gee_asset, old_start, old_end, interval='monthly')
+        openet_get_fields_export(gee_asset, new_start, new_end, interval='monthly')
 
 
 def rename_etof_downloads(path):
@@ -177,8 +243,8 @@ def check_etof_data(counties, etof_dir, plot=False):
             etof_data['time'] = pd.to_datetime(etof_data['time'])
             start = etof_data['time'].min()
             end = etof_data['time'].max()
-            etof_data['time'] = etof_data['time'] + timedelta(days=14)
-            points_exp = pd.date_range(start, end, freq='MS') + timedelta(days=14)
+            etof_data['time'] = etof_data['time'] + dt.timedelta(days=14)
+            points_exp = pd.date_range(start, end, freq='MS') + dt.timedelta(days=14)
             points_exp = points_exp.to_frame()
 
             accept = range(4, 10)
@@ -325,8 +391,8 @@ def check_etof_data_concat(counties, etof_dir, plot=False):
         etof_data['time'] = pd.to_datetime(etof_data['time'])
         start = etof_data['time'].min()
         end = etof_data['time'].max()
-        etof_data['time'] = etof_data['time'] + timedelta(days=14)
-        points_exp = pd.date_range(start, end, freq='MS') + timedelta(days=14)
+        etof_data['time'] = etof_data['time'] + dt.timedelta(days=14)
+        points_exp = pd.date_range(start, end, freq='MS') + dt.timedelta(days=14)
         points_exp = points_exp.to_frame()
 
         accept = range(4, 10)
@@ -421,22 +487,32 @@ def check_etof_data_concat(counties, etof_dir, plot=False):
 
 if __name__ == '__main__':
     # STEP 1: Get the data from Openet to Google Drive (about 36 hours?)
-    # get_all_openet_etof_data()
+    get_all_openet_etof_data()
 
-    # STEP 2: Download files manually to path specified below, rename files to something useful.
-    path_ = 'C:/Users/CND571/Documents/Data/etof_files/old-copy'  # old-copy has concat files, old has separate.
-    # rename_etof_downloads(path_)  # Breaks when all files have been renamed already.
+    # # STEP 2: Download files manually to path specified below, rename files to something useful.
+    # path_ = 'C:/Users/CND571/Documents/Data/etof_files/old-copy'  # old-copy has concat files, old has separate.
+    # # rename_etof_downloads(path_)  # Breaks when all files have been renamed already.
 
-    # STEP 3: Data quality checks (about 30 mins)
-    # concat_etof(path_)  # run in duplicate directory
-    for key in ['011', '025', '109']:
-        COUNTIES.pop(key, None)
-    cnty = list(COUNTIES.keys())
-    # cnty = ['049', '067', '097']  # subset
-    # check_etof_data_concat(cnty, path_, True)
+    # # STEP 3: Data quality checks (about 30 mins)
+    # # concat_etof(path_)  # run in duplicate directory
+    # for key in ['011', '025', '109']:
+    #     COUNTIES.pop(key, None)
+    # cnty = list(COUNTIES.keys())
+    # # cnty = ['049', '067', '097']  # subset
+    # # check_etof_data_concat(cnty, path_, True)
 
     # # Temp to get things to compare.
     # start, end = "2005-01-01", "2005-12-31"
     # gee_asset_1 = 'projects/ee-hehaugen/assets/SID_15FEB2024/033'
     # openet_get_fields_export(gee_asset_1, start, end)
+
+    # gee_asset_1 = 'projects/ee-hehaugen/assets/GoldCreekFields1'
+    # gee_asset_1 = 'projects/ee-hehaugen/assets/sixmile_fields'
+    # openet_get_fields_export(gee_asset_1, "2015-01-01", "2020-12-31", interval='monthly')
+    # openet_get_fields_export(gee_asset_1, "2021-01-01", "2025-09-30", interval='monthly')
+
+    # openet_track_export('PJ3UPJ6D25WWA7LUTWQ3PBAD')
+    # openet_track_export('EUYIY5APLVQ3NU2YUNGMWIRK')  # these seem to be taking a long time?
+
+    # openet_download_links()
 # ========================= EOF ====================================================================

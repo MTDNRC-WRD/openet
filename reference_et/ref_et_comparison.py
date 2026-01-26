@@ -1622,7 +1622,9 @@ if __name__ == '__main__':
     # plt.xlim(0, 5)
     # plt.ylim(3, 0)
 
-    livneh_stuff(old_stns, am_md)
+    footprint_plots()
+
+    # livneh_stuff(old_stns, am_md)
 
     # # This still seems like a good set to use for initial livneh comparisons...
     # print(am_md['covm'])  # 1984

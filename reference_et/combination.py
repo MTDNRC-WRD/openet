@@ -19,9 +19,7 @@ STEFAN_BOLTZMANN_DAY = 4.903 * 10 ** -9
 
 
 def get_index_shape(df):
-    """Method to return the index and shape of the input data.
-
-    """
+    """Method to return the index and shape of the input data."""
     try:
         index = pd.DatetimeIndex(df.index)
     except AttributeError:

@@ -1,10 +1,11 @@
-import os
-from datetime import timedelta, datetime, date
+
 from calendar import monthrange
-import pandas as pd
-import numpy as np
-from pypxlib import Table
+import datetime as dt
+import os
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 
 # Required for running IWR on daily weather data files.
 from utils.elevation import elevation_from_coordinate
@@ -26,17 +27,15 @@ alfalfa_kc = [0.6, 0.63, 0.68, 0.73, 0.79, 0.86, 0.92, 0.98, 1.04, 1.08, 1.12, 1
 
 
 def effective_ppt_table(loc=None):
-    """ Load effective precip table from file.
+    """Load effective precip table from file.
 
     From National Engineering Handbook (NEH) Ch 2, pg 148, Table 2-43.
 
-    Parameters
-    ----------
-    loc: str, optional; full filepath to effective precip table stored as csv.
+    Args:
+        loc: str, optional; full filepath to effective precip table stored as csv.
 
-    Returns
-    -------
-    pandas DataFrame of effective precipitation table.
+    Returns:
+        pandas DataFrame of effective precipitation table.
     """
     if loc:
         return pd.read_csv(loc, index_col=0)
@@ -50,7 +49,7 @@ def effective_ppt_table(loc=None):
 
 
 def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
-    """ Replicate functionality of IWR as used by MT DNRC for HUA analysis using IWR databases.
+    """Replicate IWR as used by MT DNRC for HUA analysis using IWR databases.
 
     Only works for stations listed in Table 1 in Rule 36.12.1902
     Custom implementation of the SCS Blaney Criddle method.
@@ -58,28 +57,28 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
     Climate db is already in Fahrenheit.
     Calculates effective precip assuming a dry year/80% chance.
 
-    Parameters
-    ----------
-    station: str, last 4 digits of station number
-    clim_db_loc: path to IWR climate database
-    fullmonth: optional, bool, set growing season to a predefined period of full months (for testing purposes)
-    pivot: optional, bool describing irrigation type: either pivot (True) or other (False)
+    Args:
+        station: str, last 4 digits of station number
+        clim_db_loc: path to IWR climate database
+        fullmonth: optional, bool, set growing season to a predefined period of full
+          months (for testing purposes)
+        pivot: optional, bool describing irrigation type: either pivot (True) or other (False)
 
-    Returns
-    -------
-    pandas DataFrame with intermediate calculations, and the dates of the growing season.
-    Last 3 columns of dataframe are first 3 columns of IWR program output. Sum columns to get totals.
+    Returns:
+        pandas DataFrame with intermediate calculations, and the dates of the growing season.
+        Last 3 columns of dataframe are first 3 columns of IWR program output. Sum columns
+        to get totals.
     """
 
     # 2000 is used arbitrarily to get a year's worth of daily time stamps.
     yr_ind = pd.date_range('2000-01-01', '2000-12-31', freq='d')
 
-    table = Table(clim_db_loc)
+    table = pd.read_csv(clim_db_loc)
     # finding correct row in IWR db
     i = 0
-    while table[i]['Station No'][2:] != station:
+    while table.at[i, 'Station No'][2:] != station:
         i += 1
-    row = table[i]
+    row = table.loc[i]
     # print(row['Station Name'])
     # loading monthly mean temps from IWR db as dict
     t = pd.Series({1: row['T Jan'], 2: row['T Feb'], 3: row['T Mar'], 4: row['T Apr'], 5: row['T May'],
@@ -98,16 +97,16 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
     # season_end1 = datetime(year=2000, month=month, day=15)  # get midpoint of month
     # # calculate number of days past midpoint of month when we reach average temp of 50
     # days = round(((53. - t[month]) * month_len) / (t[month + 1] - t[month]))
-    # season_end1 = season_end1 + timedelta(days=days)  # add days
+    # season_end1 = season_end1 + dt.timedelta(days=days)  # add days
     # print(season_end1)
 
     # calculating season start
     month = t[t >= 50].index[0]  # get month when temp gets above 50
     month_len = monthrange(2000, month - 1)[1]  # get length of preceding month
-    season_start = datetime(year=2000, month=month - 1, day=15)  # get midpoint of preceding month
+    season_start = dt.datetime(year=2000, month=month - 1, day=15)  # get midpoint of preceding month
     # calculate number of days past midpoint of preceding month when we reach average temp of 50
     days = round(((50. - t[month - 1]) * month_len) / (t[month] - t[month - 1]))
-    season_start = season_start + timedelta(days=days)  # add days
+    season_start = season_start + dt.timedelta(days=days)  # add days
 
     if fullmonth:
         # something a little weird with start dates/first period... non-inclusive of last day of month?
@@ -123,12 +122,12 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
     d = season_start
     while d.day != 1:
         first_period.append(d)
-        d += timedelta(days=1)
+        d += dt.timedelta(days=1)
 
     if d != season_start:
         midpoint = season_start + (d - season_start) / 2
         if midpoint.hour != 0:
-            midpoint = midpoint - timedelta(hours=12)  # to avoid splitting a day in half
+            midpoint = midpoint - dt.timedelta(hours=12)  # to avoid splitting a day in half
         counter = (midpoint - season_start).days
         t_prev, t_next = t.loc[midpoint.month], t.loc[midpoint.month + 1]
         month_len = monthrange(2000, midpoint.month)[1]
@@ -144,7 +143,7 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
         precip = (ppt_prev + (interp_fraction * (ppt_next - ppt_prev))) * month_fraction1
     else:
         month_fraction1 = 1  # here for effective precip estimates
-        midpoint = season_start + timedelta(days=15)
+        midpoint = season_start + dt.timedelta(days=15)
         counter = (midpoint - season_start).days
         temp = t.loc[midpoint.month]
         daylight = sunshine[midpoint.month - 1]
@@ -174,15 +173,15 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
     second_period = []
     d = dates[-1]
     while d.day != 1:
-        d += timedelta(days=1)
+        d += dt.timedelta(days=1)
     while d != season_end:
         second_period.append(d)
-        d += timedelta(days=1)
+        d += dt.timedelta(days=1)
 
     if len(second_period) > 0:
         midpoint = second_period[0] + (second_period[-1] - second_period[0]) / 2
         if midpoint.hour != 0:
-            midpoint = midpoint - timedelta(hours=12)  # to avoid splitting a day in half
+            midpoint = midpoint - dt.timedelta(hours=12)  # to avoid splitting a day in half
     else:
         midpoint = season_end
 
@@ -364,13 +363,12 @@ def iwr_database(clim_db_loc, station, fullmonth=False, pivot=True):
             df.iloc[-i, cu_i] = 0
             i += 1
 
-    table.close()
     return df, season_start, season_end
 
 
-def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', season_end='2000-09-30', pivot=True):
-    """
-    Replicates functionality of IWR as used by MT DNRC for HUA analysis with daily time series data.
+def iwr_daily_fm(df, lat_degrees=None, elev=None,
+                 season_start='2000-04-01', season_end='2000-09-30', pivot=True):
+    """Replicates IWR as used by MT DNRC for HUA analysis with daily time series data.
 
     Location not restricted to IWR stations, given required data.
     Custom implementation of the SCS Blaney Criddle method.
@@ -380,20 +378,19 @@ def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', sea
     at the start and end of the growing season have been removed.
     It is not advised to change the default start and end dates.
 
-    Parameters
-    ----------
-    df: pandas DataFrame with meteorological time series data: average daily temperature (Celsius)
-    and daily precipitation (mm)
-    lat_degrees: number, latitude of location
-    elev: number, elevation of location
-    season_start: optional, str, should be first of month
-    season_end: optional, str, should be last of month
-    pivot: optional, bool describing irrigation type: either pivot (True) or other (False)
+    Args:
+        df: pandas DataFrame with meteorological time series data: average daily
+          temperature (Celsius) and daily precipitation (mm)
+        lat_degrees: number, latitude of location
+        elev: number, elevation of location
+        season_start: optional, str, should be first of month
+        season_end: optional, str, should be last of month
+        pivot: optional, bool describing irrigation type: either pivot (True) or other (False)
 
-    Returns
-    -------
-    dataframe with intermediate calculations, and the dates of the growing season.
-    Last 3 columns of dataframe are first 3 columns of IWR program output. Sum columns to get totals.
+    Returns:
+        dataframe with intermediate calculations, and the dates of the growing season.
+        Last 3 columns of dataframe are first 3 columns of IWR program output. Sum columns
+        to get totals.
     """
 
     # NEH 2-233 "...mean temperature is assumed to occur on the 15th day of each month..."
@@ -427,7 +424,7 @@ def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', sea
         # season_start1 = datetime(year=2000, month=month - 1, day=15)  # get midpoint of preceding month
         # # calculate number of days past midpoint of preceding month when we reach average temp of 50
         # days = round(((50. - t[month - 1]) * month_len) / (t[month] - t[month - 1]))
-        # season_start1 = season_start1 + timedelta(days=days)  # add days
+        # season_start1 = season_start1 + dt.timedelta(days=days)  # add days
         # print('season_start1: ', season_start1)
     else:
         season_start = pd.to_datetime(season_start)
@@ -443,10 +440,10 @@ def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', sea
         # try this: (gets pretty close to IWR freeze dates)
         month = t[t >= 53].index[-1]  # get last month when temp gets above 53
         month_len = monthrange(2000, month)[1]  # get length of month
-        season_end = datetime(year=2000, month=month, day=15)  # get midpoint of month
+        season_end = dt.datetime(year=2000, month=month, day=15)  # get midpoint of month
         # calculate number of days past midpoint of month when we reach average temp of 53
         days = round(((53. - t[month]) * month_len) / (t[month + 1] - t[month]))
-        season_end = season_end + timedelta(days=days)  # add days
+        season_end = season_end + dt.timedelta(days=days)  # add days
         end_month = season_end.month
         # print(season_end)
     else:
@@ -458,7 +455,7 @@ def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', sea
     lat = round(lat_degrees)
     sunshine = lat_to_sunshine[lat]
 
-    dates = pd.date_range(season_start, season_end, freq='MS') + timedelta(days=14)
+    dates = pd.date_range(season_start, season_end, freq='MS') + dt.timedelta(days=14)
     d_accum = (dates - season_start).days
     pct_season = d_accum/season_length
     temps = t.loc[dates.month]
@@ -605,28 +602,31 @@ def iwr_daily_fm(df, lat_degrees=None, elev=None, season_start='2000-04-01', sea
     return df, season_start, season_end
 
 
-def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=None, pivot=True):
-    """
-    Replicates functionality of IWR as used by MT DNRC for HUA analysis with daily time series data.
-    This function can implement the algortihm at any location given the required data
+def iwr_daily(df, lat_degrees=47.0, elev=1000.0, season_start=None, season_end=None, pivot=True):
+    """Replicates IWR as used by MT DNRC for HUA analysis with daily time series data.
+
+    This function can implement the algortihm at any location given the required data.
     Custom implementation of the SCS Blaney Criddle method.
     Assumes inout data is in Celsius and rain in mm.
     Includes calculation of effective precip per NEH Ch2, pgs 147-152 (pdf 165-170)
 
-    Parameters
-    ----------
-    df:
-    lat_degrees:
-    elev:
-    season_start:
-    season_end:
-    pivot: bool, optional; whether the field is irrgiated with a center pivot (True) or not (False)
+    Args:
+        df: pandas dataframe containing daily time series of input data
+        lat_degrees: float, latitude in decimal degrees, default is central Montana
+        elev: float, elevation of location in m, default is average Montana elevation
+        season_start: str, optional; seaosnal start date for calculations. If not provided,
+          first date where the long-term average temperature is above 50 degrees Fahrenheit
+          is used.
+        season_end: str, seasonal end date for calculations. If not provided,
+          aproximate date where the long-term average temperature is below 53 degrees
+          Fahrenheit is used.
+        pivot: bool, optional; whether the field is irrigated with a center pivot (True)
+          or not (False)
 
-    Returns
-    -------
-    df:
-    season_start:
-    season_end:
+    Returns:
+        df: pandas dataframe of daily timeseries results
+        season_start: returns provided or calculated season start date.
+        season_end: returns provided or calculated season end date.
     """
 
     # NEH 2-233 "...mean temperature is assumed to occur on the 15th day of each month..."
@@ -654,7 +654,7 @@ def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=Non
         # season_start1 = datetime(year=2000, month=month - 1, day=15)  # get midpoint of preceding month
         # # calculate number of days past midpoint of preceding month when we reach average temp of 50
         # days = round(((50. - t[month - 1]) * month_len) / (t[month] - t[month - 1]))
-        # season_start1 = season_start1 + timedelta(days=days)  # add days
+        # season_start1 = season_start1 + dt.timedelta(days=days)  # add days
         # print('season_start1: ', season_start1)
     else:
         season_start = pd.to_datetime(season_start)
@@ -669,10 +669,10 @@ def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=Non
         # try this: (gets pretty close to IWR freeze dates)
         month = t[t >= 53].index[-1]  # get last month when temp gets above 53
         month_len = monthrange(2000, month)[1]  # get length of month
-        season_end = datetime(year=2000, month=month, day=15)  # get midpoint of month
+        season_end = dt.datetime(year=2000, month=month, day=15)  # get midpoint of month
         # calculate number of days past midpoint of month when we reach average temp of 53
         days = round(((53. - t[month]) * month_len) / (t[month + 1] - t[month]))
-        season_end = season_end + timedelta(days=days)  # add days
+        season_end = season_end + dt.timedelta(days=days)  # add days
         # print(season_end)
     else:
         season_end = pd.to_datetime(season_end)
@@ -686,12 +686,12 @@ def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=Non
     d = season_start
     while d.day != 1:
         first_period.append(d)
-        d += timedelta(days=1)
+        d += dt.timedelta(days=1)
 
     if d != season_start:
         midpoint = season_start + (d - season_start) / 2
         if midpoint.hour != 0:
-            midpoint = midpoint - timedelta(hours=12)  # to avoid splitting a day in half
+            midpoint = midpoint - dt.timedelta(hours=12)  # to avoid splitting a day in half
         counter = (midpoint - season_start).days
         t_prev, t_next = t.loc[midpoint.month], t.loc[midpoint.month + 1]
         month_len = monthrange(2000, midpoint.month)[1]
@@ -707,7 +707,7 @@ def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=Non
         precip = (ppt_prev + (interp_fraction * (ppt_next - ppt_prev))) * month_fraction1
     else:
         month_fraction1 = 1
-        midpoint = season_start + timedelta(days=15)
+        midpoint = season_start + dt.timedelta(days=15)
         counter = (midpoint - season_start).days
         temp = t.loc[midpoint.month]
         daylight = sunshine[midpoint.month - 1]
@@ -737,15 +737,15 @@ def iwr_daily(df, lat_degrees=None, elev=None, season_start=None, season_end=Non
     second_period = []
     d = dates[-1]
     while d.day != 1:
-        d += timedelta(days=1)
+        d += dt.timedelta(days=1)
     while d != season_end:
         second_period.append(d)
-        d += timedelta(days=1)
+        d += dt.timedelta(days=1)
 
     if len(second_period) > 0:
         midpoint = second_period[0] + (second_period[-1] - second_period[0]) / 2
         if midpoint.hour != 0:
-            midpoint = midpoint - timedelta(hours=12)  # to avoid splitting a day in half
+            midpoint = midpoint - dt.timedelta(hours=12)  # to avoid splitting a day in half
     else:
         midpoint = season_end
 
@@ -936,14 +936,13 @@ def run_one_iwr_station(station='2409', clim_db_loc=None, data_dir=None,
     Runs either iwr_db, iwr_daily, or both depending on which file paths are provided as parameters.
     Start and end dates do not affect iwr_db.
 
-    Parameters
-    ----------
-    station: str, optional; the 4-digit identifier of the IWR station
-    clim_db_loc:
-    data_dir:
-    start:
-    end:
-    pivot: bool, optional; whether the field is irrgiated with a center pivot (True) or not (False)
+    Args:
+        station: str, optional; the 4-digit identifier of the IWR station.
+        clim_db_loc: filepath to IWR climate database
+        data_dir:
+        start: str, start date for iwr_daily calculations
+        end: str, start date for iwr_daily calculations
+        pivot: bool, optional; whether the field is irrgiated with a center pivot (True) or not (False)
     """
     if clim_db_loc:
         print('Using IWR database:')
@@ -982,19 +981,27 @@ def run_one_iwr_station(station='2409', clim_db_loc=None, data_dir=None,
 
 
 def run_all_iwr_stations(clim_db_loc, out_file, data_dir=None, start='1971-01-01', end='2000-12-31'):
-    """ Runs IWR algorthm (iwr_database) for all stations in the IWR database.
-    If data_dir is provided, also runs iwr_daily on stations where daily data file exists."""
-    table = Table(clim_db_loc)
+    """Run IWR algorthm (iwr_database) for all stations in the IWR database.
+
+    Pars:
+        clim_db_loc: filepath to IWR climate database
+        out_file: csv filepath, results location
+        data_dir: optional, if provided, function also runs iwr_daily() on
+          stations where daily data file exists.
+        start: str, start date for calculations
+        end: str, end date for calculations
+    """
+    table = pd.read_csv(clim_db_loc)
     out = pd.DataFrame(index=range(1, 181), columns=['station_num', 'station_name', 'db_et', 'db_flood_ep_80',
                                                      'db_flood_cu_80', 'db_pivot_ep_80', 'db_pivot_cu_80',
                                                      'db_season_start', 'db_season_end'])
     for i in range(len(table)):
-        station = table[i]['Station No'][2:]
+        station = table.at[i, 'Station No'][2:]
         # print(station)
         bc1, start1, end1 = iwr_database(clim_db_loc, station, fullmonth=False, pivot=False)
         bc2, start2, end2 = iwr_database(clim_db_loc, station, fullmonth=False, pivot=True)
         out.at[i+1, 'station_num'] = station
-        out.at[i+1, 'station_name'] = table[i]['Station Name']
+        out.at[i+1, 'station_name'] = table.at[i, 'Station Name']
         out.at[i+1, 'db_et'] = bc1['u'].sum()
         out.at[i+1, 'db_flood_ep_80'] = bc1['ep'].sum()
         out.at[i+1, 'db_flood_cu_80'] = bc1['cu'].sum()
@@ -1007,7 +1014,7 @@ def run_all_iwr_stations(clim_db_loc, out_file, data_dir=None, start='1971-01-01
         out[['daily_et', 'daily_flood_ep_80', 'daily_flood_cu_80', 'daily_pivot_ep_80', 'daily_pivot_cu_80',
              'daily_season_start', 'daily_season_end']] = None
         for i in range(len(table)):
-            station = table[i]['Station No'][2:]
+            station = table.at[i, 'Station No'][2:]
             # print(station)
             _file = os.path.join(data_dir, 'USC0024{}.csv'.format(station))
             if os.path.isfile(_file):
@@ -1044,17 +1051,17 @@ def run_all_iwr_stations(clim_db_loc, out_file, data_dir=None, start='1971-01-01
 
 
 def plot_growing_season_starts_and_ends(clim_db_loc):
-    table = Table(clim_db_loc)
+    table = pd.read_csv(clim_db_loc)
 
     # Looking at season end dates
     end_dates = []
     doy = []
     months = []
     for i in range(len(table)):
-        temp = table[i]['Fall mo/dy 28']
+        temp = table.at[i, 'Fall mo/dy 28']
         date_m = temp[:2]
         date_d = temp[3:]
-        end_date = date(year=2000, month=int(date_m), day=int(date_d))
+        end_date = dt.date(year=2000, month=int(date_m), day=int(date_d))
         end_dates.append(end_date)
         doy.append(end_date.timetuple().tm_yday)
         months.append(end_date.month)
@@ -1064,24 +1071,21 @@ def plot_growing_season_starts_and_ends(clim_db_loc):
     # print(min(doy))
     # print(max(doy))
 
-    bins = np.arange(230, 303)
-    labels = pd.date_range(start='2000-08-17', end='2000-10-28').date
-
     # Looking at season start dates
     starts = []
     doys = []
     monthss = []
     for i in range(len(table)):
-        row = table[i]
+        row = table.loc[i]
         t = pd.Series({1: row['T Jan'], 2: row['T Feb'], 3: row['T Mar'], 4: row['T Apr'], 5: row['T May'],
                        6: row['T Jun'], 7: row['T Jul'], 8: row['T Aug'], 9: row['T Sep'], 10: row['T Oct'],
                        11: row['T Nov'], 12: row['T Dec']})
         month = t[t >= 50].index[0]  # get month when temp gets above 50
         month_len = monthrange(2000, month - 1)[1]  # get length of preceding month
-        season_start = datetime(year=2000, month=month - 1, day=15)  # get midpoint of preceding month
+        season_start = dt.datetime(year=2000, month=month - 1, day=15)  # get midpoint of preceding month
         # calculate number of days past midpoint of preceding month when we reach average temp of 50
         days = round(((50. - t[month - 1]) * month_len) / (t[month] - t[month - 1]))
-        season_start = season_start + timedelta(days=days)  # add days
+        season_start = season_start + dt.timedelta(days=days)  # add days
 
         starts.append(season_start)
         doys.append(season_start.timetuple().tm_yday)
@@ -1092,11 +1096,14 @@ def plot_growing_season_starts_and_ends(clim_db_loc):
     # print(min(doys))
     # print(max(doys))
 
-    binss = np.arange(107, 171)
-    labelss = pd.date_range(start='2000-04-16', end='2000-6-18').date
-
-    # Plotting
-
+    # # Plotting
+    #
+    # bins = np.arange(230, 303)
+    # labels = pd.date_range(start='2000-08-17', end='2000-10-28').date
+    #
+    # binss = np.arange(107, 171)
+    # labelss = pd.date_range(start='2000-04-16', end='2000-6-18').date
+    #
     # # Start and end days
     # plt.figure()
     # plt.subplot(211)
@@ -1136,15 +1143,7 @@ def plot_growing_season_starts_and_ends(clim_db_loc):
     plt.bar_label(bars1)
     plt.xlabel('Days')
 
-    # Default growing seasons
-    year = pd.date_range("01-01-2000", "12-15-2000", freq='SMS')
-    year_day = pd.date_range("01-01-2000", "12-15-2000", freq='D')
-
-    daily_kc = pd.Series(alfalfa_kc, year)
-    daily_kc = daily_kc.reindex(year_day)
-    daily_kc = daily_kc.interpolate()
-
-    ys = np.linspace(0, 1.8, 180)
+    # ys = np.linspace(0, 1.8, 180)
     print(starts[0])
     starts = [i.date() for i in starts]
     times = pd.DataFrame({'start': pd.to_datetime(starts), 'end': pd.to_datetime(end_dates), 'length': lens})
@@ -1165,6 +1164,14 @@ def plot_growing_season_starts_and_ends(clim_db_loc):
     plt.xticks(rotation='vertical')
     plt.grid(zorder=0)
 
+    # # Default growing seasons
+    # year = pd.date_range("01-01-2000", "12-15-2000", freq='SMS')
+    # year_day = pd.date_range("01-01-2000", "12-15-2000", freq='D')
+    #
+    # daily_kc = pd.Series(alfalfa_kc, year)
+    # daily_kc = daily_kc.reindex(year_day)
+    # daily_kc = daily_kc.interpolate()
+    #
     # plt.figure()
     # for i in range(180):
     #     plt.hlines(ys[i], times['start'].iloc[i], times['end'].iloc[i])
@@ -1198,10 +1205,10 @@ def plot_kc_and_gs():
     plt.figure()
     plt.plot(daily_kc)
 
-    plt.vlines(date(month=4, day=1, year=2001), 0.6, 1.2, 'tab:pink')
-    plt.vlines(date(month=9, day=30, year=2001), 0.6, 1.2, 'tab:pink')
-    plt.hlines(daily_kc.loc['04-01-2001':'09-30-2001'].mean(), date(month=4, day=1, year=2001),
-               date(month=9, day=30, year=2001), 'tab:pink',
+    plt.vlines(dt.date(month=4, day=1, year=2001), 0.6, 1.2, 'tab:pink')
+    plt.vlines(dt.date(month=9, day=30, year=2001), 0.6, 1.2, 'tab:pink')
+    plt.hlines(daily_kc.loc['04-01-2001':'09-30-2001'].mean(), dt.date(month=4, day=1, year=2001),
+               dt.date(month=9, day=30, year=2001), 'tab:pink',
                label="GS Avg: {:.2f}".format(daily_kc.loc['04-01-2001':'09-30-2001'].mean()))
 
     # # David's growing season for Park and Sweet Grass counties in memo

@@ -951,39 +951,31 @@ def cu_analysis_db(con, shp, gridmet, eta, out, start=1985, end=2024,
                                  index_col='time', parse_dates={'time': '%Y-%m-%d'})
                 if df['eta'].any():  # If there is data for that year, calculate results.
 
-                    r_index = pd.date_range('{}-01-01'.format(y), '{}-12-31'.format(y), freq='D')
-                    df = df.reindex(r_index)
-                    df = df.interpolate()
-                    df['mday'] = ['{}-{}'.format(x.month, x.day) for x in df.index]
-                    df['mask'] = [1 if d in accept else 0 for d in df['mday']]
-                    df = df[df['mask'] == 1]
-
-                    # Explanation of consumptive use calculations
-                    # IWR: sum of monthly ET minus effective precip minus carryover, all times management factor
-                    # sum(u_month - ep_month - co_month) * mf
-                    # OpenET: average seasonal ET times crop coefficient minus effective precip and carryover
-                    # (ETo * ETof) - ep - co
-                    # ETa - ep - co
+                    # ETa values are monthly sums in mm — filter to growing season months and sum.
+                    # No daily interpolation needed (unlike ETof, which was a fraction).
+                    gs_months = range(start1.month, end1.month + 1)
+                    df = df[df.index.month.isin(gs_months)]
+                    eta_season_mm = df['eta'].sum()
+                    eta_season_in = eta_season_mm / 25.4  # convert to inches to match eff_precip/carryover
 
                     if irrmapper:
-                        # Call year and field value from the irrmapper table... how?
                         frac_irr = cur.execute("SELECT frac_irr FROM irrmapper WHERE fid=? AND year=?",
                                                (fid, y)).fetchone()
                         etoss.append(grd['ETOS'].sum() * frac_irr[0])
                         etrss.append(grd['ETRS'].sum() * frac_irr[0])
                         etbcs.append(bc_pet * frac_irr[0])
-                        etrfs.append((df['eta'].mean() / grd['ETRS'].sum()) * frac_irr[0])
-                        etofs.append((df['eta'].mean() / grd['ETOS'].sum()) * frac_irr[0])
-                        opnt_cus.append((df['eta'].mean() - eff_precip - carryover) * frac_irr[0])
+                        etrfs.append((eta_season_in / grd['ETRS'].sum()) * frac_irr[0])
+                        etofs.append((eta_season_in / grd['ETOS'].sum()) * frac_irr[0])
+                        opnt_cus.append((eta_season_in - eff_precip - carryover) * frac_irr[0])
                         dnrc_cus.append(bc_cu * frac_irr[0])
                         frac_irrs.append(frac_irr[0])
                     else:
                         etoss.append(grd['ETOS'].sum())
                         etrss.append(grd['ETRS'].sum())
                         etbcs.append(bc_pet)
-                        etrfs.append(df['eta'].mean() / grd['ETRS'].sum())
-                        etofs.append(df['eta'].mean() / grd['ETOS'].sum())
-                        opnt_cus.append(df['eta'].mean() - eff_precip - carryover)
+                        etrfs.append(eta_season_in / grd['ETRS'].sum())
+                        etofs.append(eta_season_in / grd['ETOS'].sum())
+                        opnt_cus.append(eta_season_in - eff_precip - carryover)
                         dnrc_cus.append(bc_cu)
                         frac_irrs.append(-1)
                 else:
